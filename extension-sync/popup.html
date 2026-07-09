@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>清晨沙灘 LINE 同步器</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 300px;
+      font-family: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif;
+      font-size: 13px;
+      color: #2c3e50;
+      background: #fafaf7;
+      padding: 14px;
+    }
+    h1 { font-size: 15px; margin-bottom: 10px; color: #1a5c4a; }
+    .row { display: flex; justify-content: space-between; padding: 4px 0; }
+    .label { color: #7f8c8d; }
+    .value { font-weight: 600; }
+    .counts {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      margin: 10px 0;
+      text-align: center;
+    }
+    .count-box { background: #fff; border: 1px solid #e3e3dc; border-radius: 6px; padding: 6px 2px; }
+    .count-box .num { font-size: 16px; font-weight: 700; color: #1a5c4a; }
+    .count-box .cap { font-size: 11px; color: #7f8c8d; }
+    #status-badge {
+      display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px;
+      background: #e8f5ee; color: #1a5c4a;
+    }
+    #status-badge.error { background: #fdecea; color: #c0392b; }
+    #status-badge.warn { background: #fef7e0; color: #9a7b0a; }
+    #status-badge.running { background: #fef7e0; color: #9a7b0a; }
+    #error-box {
+      margin-top: 8px; padding: 8px; border-radius: 6px;
+      background: #fdecea; color: #c0392b; font-size: 12px;
+      white-space: pre-wrap; word-break: break-all; display: none;
+      max-height: 90px; overflow-y: auto;
+    }
+    #pending-box { margin-top: 6px; font-size: 12px; color: #9a7b0a; display: none; }
+    #login-box, #token-box {
+      margin-top: 8px; padding: 8px; border-radius: 6px;
+      background: #c0392b; color: #fff; font-size: 12px; font-weight: 700;
+      display: none;
+    }
+    .section { margin-top: 8px; display: none; }
+    .section .sec-title, .card .sec-title { font-size: 12px; color: #7f8c8d; margin-bottom: 3px; }
+    .section ul { list-style: none; max-height: 90px; overflow-y: auto; }
+    .section li {
+      font-size: 12px; padding: 2px 0; border-bottom: 1px dashed #e3e3dc;
+      word-break: break-all;
+    }
+    #fullsync-list li { color: #1a5c4a; }
+    #skipped-list li { color: #9a7b0a; }
+    /* 目前聊天室 / 同步清單(白名單模式) */
+    .card {
+      margin-top: 8px; padding: 8px; background: #fff;
+      border: 1px solid #e3e3dc; border-radius: 6px;
+    }
+    #current-body { font-size: 12px; color: #7f8c8d; word-break: break-all; }
+    #current-body .cur-name { font-size: 13px; font-weight: 700; color: #2c3e50; }
+    #current-body .in-list { display: inline-block; margin-top: 4px; color: #1a5c4a; font-weight: 600; }
+    .mini-btn {
+      width: auto; margin: 0 0 0 6px; padding: 2px 8px;
+      font-size: 12px; border-radius: 4px; flex: none;
+    }
+    .mini-btn.ghost { background: #fff; color: #c0392b; border: 1px solid #e3e3dc; }
+    .mini-btn.ghost:hover { background: #fdecea; }
+    #add-current { margin-top: 6px; padding: 5px 0; font-size: 13px; }
+    #watchlist-list { list-style: none; max-height: 150px; overflow-y: auto; }
+    #watchlist-list li {
+      display: flex; align-items: center; font-size: 12px;
+      padding: 3px 0; border-bottom: 1px dashed #e3e3dc;
+    }
+    #watchlist-list li:last-child { border-bottom: none; }
+    #watchlist-list .wl-name {
+      flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap; color: #2c3e50;
+    }
+    #watchlist-empty { font-size: 12px; color: #7f8c8d; }
+    button {
+      width: 100%; margin-top: 12px; padding: 8px 0;
+      background: #1a5c4a; color: #fff; border: none; border-radius: 6px;
+      font-size: 14px; cursor: pointer;
+    }
+    button:hover { background: #14483a; }
+    button:disabled { background: #95a5a6; cursor: not-allowed; }
+    .footer { margin-top: 10px; text-align: center; }
+    .footer a { color: #1a5c4a; font-size: 12px; text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h1>清晨沙灘 LINE 同步器</h1>
+
+  <div class="card" id="current-box">
+    <div class="sec-title">目前聊天室</div>
+    <div id="current-body">偵測中…</div>
+  </div>
+
+  <div class="card" id="watchlist-box">
+    <div class="sec-title" id="watchlist-title">同步清單 (0)</div>
+    <ul id="watchlist-list"></ul>
+    <div id="watchlist-empty">尚未加入任何客戶。在 chat.line.biz 開啟客戶聊天室後,由上方加入。</div>
+  </div>
+
+  <div class="row">
+    <span class="label">狀態</span>
+    <span id="status-badge">—</span>
+  </div>
+  <div class="row">
+    <span class="label">上次同步時間</span>
+    <span class="value" id="last-sync">尚未同步</span>
+  </div>
+
+  <div class="counts">
+    <div class="count-box"><div class="num" id="count-chats">0</div><div class="cap">客戶</div></div>
+    <div class="count-box"><div class="num" id="count-messages">0</div><div class="cap">訊息</div></div>
+    <div class="count-box"><div class="num" id="count-files">0</div><div class="cap">檔案</div></div>
+    <div class="count-box"><div class="num" id="count-notes">0</div><div class="cap">記事</div></div>
+  </div>
+
+  <div id="login-box">LINE 登入已失效,請至 chat.line.biz 重新登入</div>
+  <div id="token-box">API Token 錯誤,請檢查插件設定</div>
+
+  <div class="section" id="fullsync-box">
+    <div class="sec-title">建檔中的客戶</div>
+    <ul id="fullsync-list"></ul>
+  </div>
+
+  <div class="section" id="skipped-box">
+    <div class="sec-title">跳過的檔案 <span id="skipped-count"></span></div>
+    <ul id="skipped-list"></ul>
+  </div>
+
+  <div id="pending-box"></div>
+  <div id="error-box"></div>
+
+  <button id="sync-now">立即同步</button>
+
+  <div class="footer">
+    <a href="#" id="open-options">開啟設定</a>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

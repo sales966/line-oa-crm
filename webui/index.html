@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>客戶列表 — LINE OA 客戶進度中樞</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <h1>LINE OA 客戶進度中樞</h1>
+  <span class="sub" id="health-status">連線中…</span>
+</header>
+
+<main class="page">
+
+  <!-- 統計卡 -->
+  <section class="stats">
+    <div class="card stat-card">
+      <div class="label">客戶數</div>
+      <div class="value" id="stat-customers">—</div>
+    </div>
+    <div class="card stat-card">
+      <div class="label">訊息數</div>
+      <div class="value" id="stat-messages">—</div>
+    </div>
+    <div class="card stat-card">
+      <div class="label">檔案數</div>
+      <div class="value" id="stat-files">—</div>
+    </div>
+    <div class="card stat-card">
+      <div class="label">LLM 狀態</div>
+      <div class="value" id="stat-llm" style="font-size:18px;">—</div>
+      <div class="hint" id="stat-llm-hint"></div>
+    </div>
+  </section>
+
+  <!-- 搜尋 + 階段篩選 -->
+  <div class="toolbar">
+    <input type="search" id="search-input" placeholder="搜尋客戶名稱…" autocomplete="off">
+    <select id="stage-filter" aria-label="階段篩選"></select>
+    <span class="count" id="list-count"></span>
+  </div>
+
+  <!-- 客戶列表 -->
+  <section class="card">
+    <div class="table-wrap">
+      <table class="list">
+        <thead>
+          <tr>
+            <th>客戶名稱</th>
+            <th>類型</th>
+            <th>階段</th>
+            <th>最新總結</th>
+            <th style="text-align:right;">訊息數</th>
+            <th style="text-align:right;">檔案數</th>
+            <th>最後訊息</th>
+            <th>建檔狀態</th>
+            <th>待處理</th>
+          </tr>
+        </thead>
+        <tbody id="customer-tbody"></tbody>
+      </table>
+    </div>
+    <div id="list-state"></div>
+  </section>
+
+</main>
+
+<script src="api.js"></script>
+<script>
+'use strict';
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const tbody = $('customer-tbody');
+  const listState = $('list-state');
+  let reqSeq = 0; // 防止舊請求覆蓋新結果
+
+  // ---- 階段篩選下拉 ----
+  const stageSel = $('stage-filter');
+  UI.STAGE_OPTIONS.forEach(function (opt) {
+    const o = document.createElement('option');
+    o.value = opt.value;
+    o.textContent = opt.label;
+    stageSel.appendChild(o);
+  });
+
+  // ---- 頂部統計(/api/health) ----
+  async function loadHealth() {
+    try {
+      const h = await API.get('/api/health');
+      const counts = (h && h.counts) || {};
+      $('stat-customers').textContent = counts.customers != null ? counts.customers : '—';
+      $('stat-messages').textContent = counts.messages != null ? counts.messages : '—';
+      $('stat-files').textContent = counts.files != null ? counts.files : '—';
+      const llmOk = h && h.llm && h.llm !== 'disabled';
+      $('stat-llm').textContent = llmOk ? '已啟用' : '未設定';
+      $('stat-llm-hint').textContent = llmOk ? String(h.llm) : '無法產生 AI 總結';
+      $('health-status').textContent = '已連線' + (h && h.version ? ' · v' + h.version : '');
+    } catch (e) {
+      $('health-status').textContent = '無法連線到後端服務';
+      $('stat-llm').textContent = '—';
+    }
+  }
+
+  // ---- 客戶列表 ----
+  // silent = true(定時自動刷新)時不清空列表、不顯示載入中;失敗也不覆蓋既有內容
+  async function loadCustomers(silent) {
+    silent = silent === true; // 事件監聽會把 Event 物件傳進來,需嚴格判斷
+    const seq = ++reqSeq;
+    const q = $('search-input').value.trim();
+    const stage = stageSel.value;
+    const params = new URLSearchParams({ sort: 'lastMessageAt' });
+    if (q) params.set('q', q);
+    if (stage) params.set('stage', stage);
+
+    if (!silent) {
+      listState.innerHTML = UI.loadingHtml('載入客戶列表…');
+      tbody.innerHTML = '';
+      $('list-count').textContent = '';
+    }
+
+    let data;
+    try {
+      data = await API.get('/api/customers?' + params.toString());
+    } catch (e) {
+      if (seq !== reqSeq) return;
+      if (!silent) listState.innerHTML = UI.errorHtml('載入失敗:' + e.message);
+      return;
+    }
+    if (seq !== reqSeq) return;
+
+    const customers = (data && data.customers) || [];
+    if (customers.length === 0) {
+      tbody.innerHTML = '';
+      $('list-count').textContent = '';
+      listState.innerHTML = UI.emptyHtml(q || stage ? '找不到符合條件的客戶' : '尚無客戶資料,請先透過同步插件匯入 LINE 對話');
+      return;
+    }
+    listState.innerHTML = '';
+    $('list-count').textContent = '共 ' + customers.length + ' 位客戶';
+    tbody.innerHTML = customers.map(renderRow).join('');
+
+    // 建檔狀態:先用快取立即顯示,再逐列向後端確認(避免自動刷新時閃爍)
+    const chatIds = customers
+      .map(function (c) { return c.lineChatId || c.chatId || ''; })
+      .filter(Boolean);
+    chatIds.forEach(function (id) {
+      if (syncStatusCache[id]) renderSyncCell(id, syncStatusCache[id]);
+    });
+    fillSyncStatuses(chatIds, seq);
+  }
+
+  function renderRow(c) {
+    const chatId = c.lineChatId || c.chatId || '';
+    const name = c.lineName || '(未命名)';
+    const summary = c.latestSummary && c.latestSummary.summaryText
+      ? c.latestSummary.summaryText.replace(/\s+/g, ' ')
+      : '';
+    return '<tr data-chatid="' + UI.esc(chatId) + '">' +
+      '<td class="cust-name">' + UI.esc(name) + '</td>' +
+      '<td>' + UI.chatTypeBadge(c.chatType) + '</td>' +
+      '<td>' + UI.stageBadge(c.currentStage) + '</td>' +
+      '<td class="summary-cell" title="' + UI.esc(summary) + '">' +
+        (summary ? UI.esc(summary) : '<span style="color:var(--text-faint);">尚無總結</span>') + '</td>' +
+      '<td class="num">' + (c.msgCount != null ? c.msgCount : 0) + '</td>' +
+      '<td class="num">' + (c.fileCount != null ? c.fileCount : 0) + '</td>' +
+      '<td title="' + UI.esc(UI.fmtDateTime(c.lastMessageAt)) + '">' + UI.esc(UI.relTime(c.lastMessageAt)) + '</td>' +
+      '<td class="sync-cell" data-sync="' + UI.esc(chatId) + '"><span class="badge sync-none">…</span></td>' +
+      '<td style="text-align:center;">' + (c.followedUp ? '<span class="dot-followup" title="待處理"></span>' : '') + '</td>' +
+      '</tr>';
+  }
+
+  // ---- 建檔狀態(每列查詢 GET full-sync,限制並發) ----
+  const syncStatusCache = {}; // chatId → status,僅供重繪時立即顯示
+
+  async function fillSyncStatuses(chatIds, seq) {
+    const queue = chatIds.slice();
+    async function worker() {
+      while (queue.length > 0) {
+        if (seq !== reqSeq) return; // 列表已被新請求重繪,停止
+        const id = queue.shift();
+        let status;
+        try {
+          const d = await API.getFullSync(id);
+          status = (d && d.status) || 'none';
+        } catch (e) {
+          status = null; // 查詢失敗 → 顯示「—」
+        }
+        if (status) syncStatusCache[id] = status;
+        if (seq === reqSeq) renderSyncCell(id, status);
+      }
+    }
+    const workers = [];
+    for (let i = 0; i < 6; i++) workers.push(worker());
+    await Promise.all(workers);
+  }
+
+  function renderSyncCell(chatId, status) {
+    let cell;
+    try {
+      cell = tbody.querySelector('td.sync-cell[data-sync="' + CSS.escape(chatId) + '"]');
+    } catch (e) { cell = null; }
+    if (!cell) return;
+    if (!status) {
+      cell.innerHTML = '<span class="badge sync-none" title="無法取得建檔狀態">—</span>';
+      return;
+    }
+    let html = UI.syncBadge(status);
+    if (status === 'none' || status === 'error') {
+      html += '<button type="button" class="btn small sync-btn" data-chatid="' + UI.esc(chatId) + '">' +
+        (status === 'error' ? '重試' : '建檔') + '</button>';
+    }
+    cell.innerHTML = html;
+  }
+
+  async function startRowFullSync(btn) {
+    const id = btn.dataset.chatid;
+    if (!id) return;
+    btn.disabled = true;
+    try {
+      await API.requestFullSync(id);
+    } catch (e) {
+      btn.disabled = false;
+      alert('建檔請求送出失敗:' + e.message);
+      return;
+    }
+    syncStatusCache[id] = 'pending';
+    renderSyncCell(id, 'pending');
+  }
+
+  // 點列 → 客戶詳情;點「建檔」按鈕 → 送出建檔請求(不進詳情頁)
+  tbody.addEventListener('click', function (ev) {
+    const btn = ev.target.closest('button.sync-btn');
+    if (btn) {
+      ev.stopPropagation();
+      startRowFullSync(btn);
+      return;
+    }
+    const tr = ev.target.closest('tr[data-chatid]');
+    if (tr && tr.dataset.chatid) {
+      location.href = 'customer.html?chatId=' + encodeURIComponent(tr.dataset.chatid);
+    }
+  });
+
+  $('search-input').addEventListener('input', UI.debounce(loadCustomers, 300));
+  stageSel.addEventListener('change', loadCustomers);
+
+  // ---- 啟動:先 me(掛右上角使用者 chip);401 由 api.js 統一轉跳 login.html ----
+  (async function start() {
+    const me = await UI.initAuth();
+    if (!me) {
+      $('health-status').textContent = '未登入或無法連線到後端服務';
+      return;
+    }
+    loadHealth();
+    loadCustomers();
+
+    // 24x7 看板:每 60 秒自動刷新統計卡、客戶列表與相對時間(reqSeq 防競態,可安全重入)
+    setInterval(function () {
+      loadHealth();
+      loadCustomers(true);
+    }, 60000);
+  })();
+})();
+</script>
+</body>
+</html>

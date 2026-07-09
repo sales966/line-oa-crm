@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>使用者管理 — LINE OA 客戶進度中樞</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="back" href="index.html">← 返回客戶列表</a>
+  <h1>使用者管理</h1>
+  <span class="sub">僅「管理」角色可使用</span>
+</header>
+
+<main class="page">
+  <div id="page-state"></div>
+
+  <section class="card" id="users-card" hidden>
+    <div class="card-head">
+      <span>使用者列表 <span class="sub" id="users-count"></span></span>
+      <button type="button" class="btn small primary" id="add-user-btn">➕ 新增使用者</button>
+    </div>
+    <div class="table-wrap">
+      <table class="list">
+        <thead>
+          <tr>
+            <th>帳號</th>
+            <th>顯示名</th>
+            <th>角色</th>
+            <th>狀態</th>
+            <th>建立時間</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="users-tbody"></tbody>
+      </table>
+    </div>
+    <div id="list-state"></div>
+  </section>
+</main>
+
+<script src="api.js"></script>
+<script>
+'use strict';
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const tbody = $('users-tbody');
+  let me = null;         // 目前登入者(initAuth 取得)
+  let usersById = {};    // id → user,供編輯浮層帶入現值
+
+  // ---- 使用者列表 ----
+  async function loadUsers() {
+    $('list-state').innerHTML = UI.loadingHtml('載入使用者…');
+    tbody.innerHTML = '';
+    $('users-count').textContent = '';
+    let data;
+    try {
+      data = await API.get('/api/users');
+    } catch (e) {
+      $('list-state').innerHTML = e.status === 403
+        ? UI.errorHtml('權限不足:僅「管理」角色可使用使用者管理')
+        : UI.errorHtml('載入失敗:' + e.message);
+      return;
+    }
+    const users = (data && data.users) || [];
+    usersById = {};
+    users.forEach(function (u) { usersById[u.id] = u; });
+    if (users.length === 0) {
+      $('list-state').innerHTML = UI.emptyHtml('尚無使用者');
+      return;
+    }
+    $('list-state').innerHTML = '';
+    $('users-count').textContent = '(' + users.length + ')';
+    tbody.innerHTML = users.map(renderRow).join('');
+  }
+
+  function renderRow(u) {
+    const self = me && u.id === me.id;
+    const statusBadge = u.active
+      ? '<span class="badge status-on">啟用</span>'
+      : '<span class="badge status-off">停用</span>';
+    return '<tr data-id="' + UI.esc(String(u.id)) + '"' + (u.active ? '' : ' class="row-inactive"') + '>' +
+      '<td class="cust-name">' + UI.esc(u.username) +
+        (self ? ' <span class="badge chat-type">自己</span>' : '') + '</td>' +
+      '<td>' + UI.esc(u.displayName) + '</td>' +
+      '<td>' + UI.roleBadge(u.role) + '</td>' +
+      '<td>' + statusBadge + '</td>' +
+      '<td>' + UI.esc(UI.fmtDateTime(u.createdAt)) + '</td>' +
+      '<td style="text-align:right;"><button type="button" class="btn small edit-btn" data-id="' +
+        UI.esc(String(u.id)) + '">編輯</button></td>' +
+      '</tr>';
+  }
+
+  // ---- 浮層共用 ----
+  function openModal(innerHtml) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const card = document.createElement('div');
+    card.className = 'modal-card';
+    card.innerHTML = innerHtml;
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+    function close() { overlay.remove(); }
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) close();
+    });
+    return { card: card, close: close };
+  }
+
+  function roleOptionsHtml(selected) {
+    return UI.TEAM_ROLES.map(function (r) {
+      return '<option value="' + r + '"' + (r === selected ? ' selected' : '') + '>' + r + '</option>';
+    }).join('');
+  }
+
+  /** Enter 送出(輸入法選字中除外) */
+  function bindEnterSubmit(card, submit) {
+    card.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && e.target.tagName !== 'SELECT') {
+        if (e.isComposing || e.keyCode === 229) return;
+        e.preventDefault();
+        submit();
+      }
+    });
+  }
+
+  // ---- 新增使用者 ----
+  function showAddModal() {
+    const m = openModal(
+      '<h2>新增使用者</h2>' +
+      '<label for="au-username">帳號</label>' +
+      '<input id="au-username" type="text" maxlength="30" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="登入用,英數字與 . _ -">' +
+      '<label for="au-name">顯示名</label>' +
+      '<input id="au-name" type="text" maxlength="30" autocomplete="off" placeholder="例:小美">' +
+      '<label for="au-role">角色</label>' +
+      '<select id="au-role">' + roleOptionsHtml('跟單') + '</select>' +
+      '<label for="au-pw">初始密碼</label>' +
+      '<input id="au-pw" type="password" autocomplete="new-password" placeholder="至少 6 個字元">' +
+      '<div class="modal-err" id="au-err"></div>' +
+      '<div class="modal-actions">' +
+      '<button type="button" class="btn" id="au-cancel">取消</button>' +
+      '<button type="button" class="btn primary" id="au-ok">建立</button>' +
+      '</div>'
+    );
+    const card = m.card;
+    const errBox = card.querySelector('#au-err');
+    const okBtn = card.querySelector('#au-ok');
+
+    async function submit() {
+      const username = card.querySelector('#au-username').value.trim();
+      const displayName = card.querySelector('#au-name').value.trim();
+      const role = card.querySelector('#au-role').value;
+      const password = card.querySelector('#au-pw').value;
+      if (!/^[A-Za-z0-9._-]{1,30}$/.test(username)) {
+        errBox.textContent = '帳號僅能使用英數字與 . _ -(1–30 字)';
+        return;
+      }
+      if (!displayName) { errBox.textContent = '請輸入顯示名'; return; }
+      if (password.length < 6) { errBox.textContent = '初始密碼至少 6 個字元'; return; }
+      errBox.textContent = '';
+      okBtn.disabled = true;
+      try {
+        await API.post('/api/users', {
+          username: username, displayName: displayName, role: role, password: password
+        });
+        m.close();
+        loadUsers();
+      } catch (e) {
+        errBox.textContent = '建立失敗:' + e.message;
+        okBtn.disabled = false;
+      }
+    }
+    okBtn.addEventListener('click', submit);
+    card.querySelector('#au-cancel').addEventListener('click', m.close);
+    bindEnterSubmit(card, submit);
+    card.querySelector('#au-username').focus();
+  }
+
+  // ---- 編輯使用者(改顯示名/角色/停用/重設密碼) ----
+  function showEditModal(u) {
+    const self = me && u.id === me.id;
+    const m = openModal(
+      '<h2>編輯使用者</h2>' +
+      '<label>帳號</label>' +
+      '<div class="modal-static">' + UI.esc(u.username) + (self ? ' <span class="badge chat-type">自己</span>' : '') + '</div>' +
+      '<label for="eu-name">顯示名</label>' +
+      '<input id="eu-name" type="text" maxlength="30" autocomplete="off">' +
+      '<label for="eu-role">角色</label>' +
+      '<select id="eu-role">' + roleOptionsHtml(u.role) + '</select>' +
+      '<label for="eu-active">狀態</label>' +
+      '<select id="eu-active"' + (self ? ' disabled title="不可停用自己"' : '') + '>' +
+      '<option value="1"' + (u.active ? ' selected' : '') + '>啟用</option>' +
+      '<option value="0"' + (u.active ? '' : ' selected') + '>停用</option>' +
+      '</select>' +
+      (self ? '<div class="modal-hint">不可停用自己</div>' : '') +
+      '<label for="eu-pw">重設密碼</label>' +
+      '<input id="eu-pw" type="password" autocomplete="new-password" placeholder="留空表示不變更">' +
+      '<div class="modal-err" id="eu-err"></div>' +
+      '<div class="modal-actions">' +
+      '<button type="button" class="btn" id="eu-cancel">取消</button>' +
+      '<button type="button" class="btn primary" id="eu-ok">儲存</button>' +
+      '</div>'
+    );
+    const card = m.card;
+    card.querySelector('#eu-name').value = u.displayName || '';
+    const errBox = card.querySelector('#eu-err');
+    const okBtn = card.querySelector('#eu-ok');
+
+    async function submit() {
+      const displayName = card.querySelector('#eu-name').value.trim();
+      const role = card.querySelector('#eu-role').value;
+      const active = self ? 1 : Number(card.querySelector('#eu-active').value);
+      const password = card.querySelector('#eu-pw').value;
+      if (!displayName) { errBox.textContent = '請輸入顯示名'; return; }
+      if (password && password.length < 6) { errBox.textContent = '新密碼至少 6 個字元'; return; }
+      const body = { displayName: displayName, role: role, active: active };
+      if (password) body.password = password;
+      errBox.textContent = '';
+      okBtn.disabled = true;
+      try {
+        await API.put('/api/users/' + encodeURIComponent(u.id), body);
+        m.close();
+        loadUsers();
+        // 改到自己 → 重新取 me,右上角 chip 同步更新
+        if (self) { me = (await UI.initAuth()) || me; }
+      } catch (e) {
+        errBox.textContent = '儲存失敗:' + e.message;
+        okBtn.disabled = false;
+      }
+    }
+    okBtn.addEventListener('click', submit);
+    card.querySelector('#eu-cancel').addEventListener('click', m.close);
+    bindEnterSubmit(card, submit);
+    card.querySelector('#eu-name').focus();
+  }
+
+  // 點「編輯」按鈕或整列 → 編輯浮層
+  tbody.addEventListener('click', function (ev) {
+    const btn = ev.target.closest('button.edit-btn');
+    const tr = ev.target.closest('tr[data-id]');
+    const id = btn ? btn.dataset.id : (tr && tr.dataset.id);
+    if (!id || !usersById[id]) return;
+    showEditModal(usersById[id]);
+  });
+
+  $('add-user-btn').addEventListener('click', showAddModal);
+
+  // ---- 啟動:先 me(401 由 api.js 統一轉跳 login);非管理員顯示權限不足 ----
+  (async function init() {
+    $('page-state').innerHTML = UI.loadingHtml('載入中…');
+    me = await UI.initAuth();
+    if (!me) {
+      $('page-state').innerHTML = UI.errorHtml('未登入或無法連線到後端服務');
+      return;
+    }
+    if (me.role !== '管理') {
+      $('page-state').innerHTML = UI.errorHtml('權限不足:僅「管理」角色可使用使用者管理');
+      return;
+    }
+    $('page-state').innerHTML = '';
+    $('users-card').hidden = false;
+    loadUsers();
+  })();
+})();
+</script>
+</body>
+</html>

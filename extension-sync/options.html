@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>清晨沙灘 LINE 同步器 — 設定</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif;
+      font-size: 14px;
+      color: #2c3e50;
+      background: #fafaf7;
+      display: flex;
+      justify-content: center;
+      padding: 40px 16px;
+    }
+    .card {
+      width: 100%;
+      max-width: 480px;
+      background: #fff;
+      border: 1px solid #e3e3dc;
+      border-radius: 10px;
+      padding: 28px;
+    }
+    h1 { font-size: 18px; color: #1a5c4a; margin-bottom: 20px; }
+    .field { margin-bottom: 18px; }
+    label { display: block; margin-bottom: 6px; font-weight: 600; }
+    .hint { font-size: 12px; color: #7f8c8d; margin-top: 4px; }
+    input, select {
+      width: 100%; padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px;
+      font-size: 14px; background: #fff;
+    }
+    input:focus, select:focus { outline: none; border-color: #1a5c4a; }
+    .hour-row { display: flex; align-items: center; gap: 8px; }
+    .hour-row select { width: auto; flex: 1; }
+    button {
+      padding: 9px 28px; background: #1a5c4a; color: #fff; border: none;
+      border-radius: 6px; font-size: 14px; cursor: pointer;
+    }
+    button:hover { background: #14483a; }
+    #save-msg { margin-left: 12px; font-size: 13px; color: #1a5c4a; }
+    #save-msg.error { color: #c0392b; }
+    .note {
+      margin-top: 22px; padding: 10px 12px; background: #f4f8f6;
+      border-left: 3px solid #1a5c4a; font-size: 12px; color: #555; line-height: 1.7;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>清晨沙灘 LINE 同步器 — 設定</h1>
+
+    <div class="field">
+      <label for="backend-url">後端網址</label>
+      <input type="text" id="backend-url" placeholder="http://localhost:4680">
+      <div class="hint">本地「LINE OA 客戶進度中樞」後端位置,預設 http://localhost:4680</div>
+    </div>
+
+    <div class="field">
+      <label for="extension-token">後端 API Token</label>
+      <input type="password" id="extension-token" placeholder="可留空(過渡模式)" autocomplete="off">
+      <div class="hint">後端 .env 的 EXTENSION_TOKEN,設定後所有同步請求將攜帶此金鑰;留空則不攜帶(過渡模式)。</div>
+    </div>
+
+    <div class="field">
+      <label for="interval">定時同步間隔(分鐘)</label>
+      <input type="number" id="interval" min="1" step="1" placeholder="60">
+      <div class="hint">定時輪詢白名單客戶的間隔,最小 1 分鐘,預設 60 分鐘</div>
+    </div>
+
+    <div class="field">
+      <label for="start-hour">定時同步時段</label>
+      <div class="hour-row">
+        <select id="start-hour"></select>
+        <span>~</span>
+        <select id="end-hour"></select>
+      </div>
+      <div class="hint">
+        定時同步僅在此時段執行;新訊息偵測與手動同步不受限。
+        預設 10:00 ~ 22:00;起訖相同代表全天執行。
+      </div>
+    </div>
+
+    <div>
+      <button id="save">儲存</button>
+      <span id="save-msg"></span>
+    </div>
+
+    <div class="note">
+      提醒:同步需保持一個已登入的 https://chat.line.biz 分頁開啟。
+      本插件只把資料傳送到上方設定的後端網址,不會傳送到任何第三方。
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

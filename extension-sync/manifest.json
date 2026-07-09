@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "清晨沙灘 LINE 同步器",
+  "description": "將 chat.line.biz 的聊天、訊息、記事本與檔案同步到本地「LINE OA 客戶進度中樞」後端。與其他插件完全獨立,互不影響。",
+  "version": "1.2.0",
+  "permissions": ["storage", "alarms", "tabs"],
+  "host_permissions": [
+    "https://chat.line.biz/*",
+    "https://chat-content.line.biz/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://chat.line.biz/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "清晨沙灘 LINE 同步器"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  }
+}

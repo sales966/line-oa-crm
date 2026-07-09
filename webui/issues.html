@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>問題回報 — LINE OA 客戶進度中樞</title>
+<link rel="stylesheet" href="app.css">
+<style>
+  /* issues.html 專用排版(不動 app.css) */
+  .issues-main { max-width: 960px; }
+  .issue-form-card { padding: 18px 20px; margin-bottom: 18px; }
+  .issue-form-card label {
+    display: block;
+    margin: 10px 0 4px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-soft);
+  }
+  .issue-form-card input[type="text"],
+  .issue-form-card textarea {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card);
+    outline: none;
+    font: inherit;
+    font-size: 13.5px;
+  }
+  .issue-form-card textarea { resize: vertical; min-height: 90px; white-space: pre-wrap; }
+  .issue-form-card input[type="text"]:focus,
+  .issue-form-card textarea:focus { border-color: var(--primary); }
+  .issue-form-actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+  .issue-form-err { color: var(--red); font-size: 12.5px; }
+  .issue-form-ok { color: var(--green); font-size: 12.5px; }
+  .issue-chat-hint {
+    font-size: 12px;
+    color: var(--text-soft);
+    background: var(--primary-soft);
+    border-radius: 8px;
+    padding: 6px 10px;
+    margin-top: 4px;
+  }
+  /* 問題卡片 */
+  .issue-list { display: flex; flex-direction: column; gap: 12px; }
+  .issue-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    background: var(--card);
+  }
+  .issue-card-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .issue-title { font-weight: 700; font-size: 14.5px; word-break: break-word; }
+  .issue-meta { color: var(--text-faint); font-size: 12px; white-space: nowrap; }
+  .issue-body {
+    color: var(--text);
+    font-size: 13px;
+    margin-top: 6px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .issue-sub { color: var(--text-soft); font-size: 12px; margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+  .issue-note {
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: #fafbfc;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--primary);
+    border-radius: 6px;
+    font-size: 12.5px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .issue-note .note-label { font-weight: 700; color: var(--text-soft); margin-right: 6px; }
+  /* 狀態徽章 */
+  .badge.status-open  { background: #fff7e6; color: #b45309; }
+  .badge.status-prog  { background: var(--primary-soft); color: #1d4ed8; }
+  .badge.status-closed{ background: #f3f4f6; color: #6b7280; }
+  /* 管理員操作列 */
+  .issue-admin {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 10px;
+  }
+  .issue-admin .fld { display: flex; flex-direction: column; gap: 4px; }
+  .issue-admin .fld.grow { flex: 1; min-width: 180px; }
+  .issue-admin label { font-size: 12px; font-weight: 600; color: var(--text-soft); }
+  .issue-admin select, .issue-admin input[type="text"] {
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card);
+    outline: none;
+    font: inherit;
+    font-size: 13px;
+  }
+  .issue-admin select:focus, .issue-admin input[type="text"]:focus { border-color: var(--primary); }
+  .issue-admin .save-state { font-size: 12px; }
+  .issue-admin .save-state.ok { color: var(--green); }
+  .issue-admin .save-state.err { color: var(--red); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="back" href="index.html">← 返回客戶列表</a>
+  <h1>問題回報</h1>
+  <span class="sub" id="scope-hint"></span>
+</header>
+
+<main class="page issues-main">
+  <div id="page-state"></div>
+
+  <div id="issues-content" hidden>
+
+    <!-- 回報表單 -->
+    <section class="card issue-form-card">
+      <label for="if-title">問題標題</label>
+      <input id="if-title" type="text" maxlength="120" placeholder="簡短描述問題,例:檔案上傳一直失敗">
+      <label for="if-body">詳細說明</label>
+      <textarea id="if-body" maxlength="4000" placeholder="發生什麼、在哪個畫面、如何重現(可留空)"></textarea>
+      <div id="if-chat-hint" class="issue-chat-hint" hidden></div>
+      <div class="issue-form-actions">
+        <button type="button" class="btn primary" id="if-submit">送出回報</button>
+        <span id="if-msg"></span>
+      </div>
+    </section>
+
+    <!-- 問題列表 -->
+    <section class="card">
+      <div class="card-head">
+        <span id="list-title">我的回報 <span class="sub" id="list-count"></span></span>
+        <button type="button" class="btn small" id="refresh-btn">↻ 重新整理</button>
+      </div>
+      <div class="card-body">
+        <div id="list-state"></div>
+        <div class="issue-list" id="issue-list"></div>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<script src="api.js"></script>
+<script>
+'use strict';
+(function () {
+  const $ = (id) => document.getElementById(id);
+  let me = null;
+  let isAdmin = false;
+  const chatId = UI.qsParam('chatId') || '';
+
+  const STATUS = {
+    open:        { label: '待處理', cls: 'status-open' },
+    in_progress: { label: '處理中', cls: 'status-prog' },
+    closed:      { label: '已結案', cls: 'status-closed' }
+  };
+  const STATUS_ORDER = ['open', 'in_progress', 'closed'];
+
+  function statusBadge(status) {
+    const s = STATUS[status] || { label: status || '待處理', cls: 'status-open' };
+    return '<span class="badge ' + s.cls + '">' + UI.esc(s.label) + '</span>';
+  }
+
+  // ---- 送出回報 ----
+  async function submitIssue() {
+    const title = $('if-title').value.trim();
+    const body = $('if-body').value.trim();
+    const msg = $('if-msg');
+    if (!title) {
+      msg.className = 'issue-form-err';
+      msg.textContent = '請輸入問題標題';
+      return;
+    }
+    const payload = { title: title, body: body };
+    if (chatId) payload.lineChatId = chatId;
+    const btn = $('if-submit');
+    btn.disabled = true;
+    msg.className = '';
+    msg.textContent = '送出中…';
+    try {
+      await API.post('/api/issues', payload);
+      $('if-title').value = '';
+      $('if-body').value = '';
+      msg.className = 'issue-form-ok';
+      msg.textContent = '已送出,謝謝回報!';
+      loadIssues();
+    } catch (e) {
+      msg.className = 'issue-form-err';
+      msg.textContent = '送出失敗:' + e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // ---- 載入列表 ----
+  async function loadIssues() {
+    $('list-state').innerHTML = UI.loadingHtml('載入回報…');
+    $('issue-list').innerHTML = '';
+    $('list-count').textContent = '';
+    let data;
+    try {
+      data = await API.get('/api/issues');
+    } catch (e) {
+      $('list-state').innerHTML = UI.errorHtml('載入失敗:' + e.message);
+      return;
+    }
+    const issues = (data && data.issues) || [];
+    if (issues.length === 0) {
+      $('list-state').innerHTML = UI.emptyHtml(isAdmin ? '目前沒有任何問題回報' : '你尚未回報任何問題');
+      return;
+    }
+    $('list-state').innerHTML = '';
+    $('list-count').textContent = '(' + issues.length + ')';
+    $('issue-list').innerHTML = issues.map(renderIssue).join('');
+    if (isAdmin) bindAdminControls();
+  }
+
+  function renderIssue(it) {
+    const reporter = it.reporterName || '—';
+    const role = it.reporterRole ? UI.roleBadge(it.reporterRole) : '';
+    let sub = '<span>回報人:' + UI.esc(reporter) + '</span>' +
+      (role ? '<span>' + role + '</span>' : '') +
+      '<span>' + UI.esc(UI.fmtDateTime(it.createdAt)) + '</span>';
+    if (it.lineChatId) {
+      sub += '<a href="customer.html?chatId=' + UI.esc(encodeURIComponent(it.lineChatId)) + '">前往客戶頁 →</a>';
+    }
+
+    let admin = '';
+    if (isAdmin) {
+      const opts = STATUS_ORDER.map(function (s) {
+        return '<option value="' + s + '"' + (it.status === s ? ' selected' : '') + '>' + UI.esc(STATUS[s].label) + '</option>';
+      }).join('');
+      admin =
+        '<div class="issue-admin" data-id="' + UI.esc(String(it.id)) + '">' +
+        '<div class="fld"><label>狀態</label>' +
+        '<select class="ia-status">' + opts + '</select></div>' +
+        '<div class="fld grow"><label>管理員備註</label>' +
+        '<input type="text" class="ia-note" maxlength="2000" value="' + UI.esc(it.adminNote || '') + '" placeholder="處理說明(選填)"></div>' +
+        '<button type="button" class="btn small primary ia-save">儲存</button>' +
+        '<span class="save-state ia-msg"></span>' +
+        '</div>';
+    } else if (it.adminNote) {
+      // 一般同仁:唯讀顯示管理員備註
+      admin = '<div class="issue-note"><span class="note-label">管理員備註</span>' + UI.esc(it.adminNote) + '</div>';
+    }
+
+    return '<div class="issue-card">' +
+      '<div class="issue-card-head">' +
+        '<span class="issue-title">' + UI.esc(it.title) + '</span>' +
+        statusBadge(it.status) +
+      '</div>' +
+      (it.body ? '<div class="issue-body">' + UI.esc(it.body) + '</div>' : '') +
+      '<div class="issue-sub">' + sub + '</div>' +
+      admin +
+      '</div>';
+  }
+
+  // ---- 管理員:改狀態 / 備註 ----
+  function bindAdminControls() {
+    Array.prototype.forEach.call(document.querySelectorAll('.issue-admin'), function (row) {
+      const id = row.dataset.id;
+      const saveBtn = row.querySelector('.ia-save');
+      const msg = row.querySelector('.ia-msg');
+      saveBtn.addEventListener('click', async function () {
+        const status = row.querySelector('.ia-status').value;
+        const adminNote = row.querySelector('.ia-note').value;
+        saveBtn.disabled = true;
+        msg.className = 'save-state ia-msg';
+        msg.textContent = '儲存中…';
+        try {
+          await API.put('/api/issues/' + encodeURIComponent(id), { status: status, adminNote: adminNote });
+          msg.className = 'save-state ia-msg ok';
+          msg.textContent = '已儲存';
+        } catch (e) {
+          msg.className = 'save-state ia-msg err';
+          msg.textContent = '儲存失敗:' + e.message;
+        } finally {
+          saveBtn.disabled = false;
+        }
+      });
+    });
+  }
+
+  // ---- 事件 ----
+  $('if-submit').addEventListener('click', submitIssue);
+  $('refresh-btn').addEventListener('click', loadIssues);
+
+  // ---- 啟動 ----
+  (async function init() {
+    $('page-state').innerHTML = UI.loadingHtml('載入中…');
+    me = await UI.initAuth();
+    if (!me) {
+      $('page-state').innerHTML = UI.errorHtml('未登入或無法連線到後端服務');
+      return;
+    }
+    isAdmin = me.role === '管理';
+    $('page-state').innerHTML = '';
+    $('issues-content').hidden = false;
+    $('scope-hint').textContent = isAdmin ? '管理員:可檢視並處理全部回報' : '你可回報問題並查看自己的回報';
+    $('list-title').childNodes[0].nodeValue = isAdmin ? '全部回報 ' : '我的回報 ';
+    if (chatId) {
+      $('if-chat-hint').hidden = false;
+      $('if-chat-hint').textContent = '此回報將關聯目前客戶(chatId:' + chatId + ')';
+    }
+    loadIssues();
+  })();
+})();
+</script>
+</body>
+</html>

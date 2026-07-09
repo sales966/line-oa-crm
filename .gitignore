@@ -1,0 +1,42 @@
+# 依赖
+node_modules/
+
+# 环境变量(含 API key,绝不上传)
+.env
+*.env
+!.env.example
+
+# 数据与档案(本地主数据,勿入 git)
+backend/data/
+backend/storage/
+data/
+storage/
+
+# SQLite 附属文件
+*.db
+*.db-wal
+*.db-shm
+
+# 日志与临时
+*.log
+.DS_Store
+Thumbs.db
+
+# 建置产物 / 打包
+webui/plugin.zip
+
+# 一次性维护脚本(含真实 botId / 客户资料,勿公开)
+backend/scripts/
+
+# 内部设计文件(含真实 botId、ERP 资讯、客户名,公开前需另行脱敏)
+PLAN.md
+CONTRACT.md
+
+# 会话 / 编辑器
+.claude/
+.vscode/
+
+# 此工作区内的其他独立专案(非本专案,勿纳入)
+bagsite/
+mbpack-video/
+mockup-studio/

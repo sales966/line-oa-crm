@@ -1,0 +1,1837 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>客戶詳情 — LINE OA 客戶進度中樞</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="back" href="index.html">← 返回客戶列表</a>
+  <h1 id="page-title">客戶詳情</h1>
+  <span class="sub" id="page-sub"></span>
+  <span class="sync-ctrl">
+    <span class="sync-err-inline" id="sync-error" hidden></span>
+    <span id="sync-badge"></span>
+    <button type="button" class="btn small" id="full-sync-btn" hidden>🔄 建檔</button>
+  </span>
+</header>
+
+<main class="page">
+  <div id="page-state"></div>
+
+  <!-- 進度面板:五階段步驟條 + 每階段任務紅綠燈 + 天數/物流參數 -->
+  <section class="card progress-card" id="progress-card" hidden>
+    <div class="card-head">
+      <span>📊 進度</span>
+      <span class="progress-lock-wrap">
+        <label for="stage-override" class="progress-lock-label">階段鎖定</label>
+        <select id="stage-override" class="progress-lock-select" title="手動鎖定階段;選「自動」則依任務推算"></select>
+      </span>
+    </div>
+    <div class="card-body" id="progress-body"></div>
+  </section>
+
+  <div class="detail-grid" id="detail-grid" hidden>
+
+    <!-- 左欄:客戶資訊 + 記事本 -->
+    <div class="col">
+      <section class="card">
+        <div class="card-head">客戶資訊</div>
+        <div class="card-body" id="info-body"></div>
+      </section>
+      <section class="card">
+        <div class="card-head">LINE 記事本</div>
+        <div class="card-body" id="notes-body"></div>
+      </section>
+    </div>
+
+    <!-- 中欄:對話時間軸 + 內部討論 -->
+    <div class="col">
+      <section class="card chat-panel">
+        <div class="card-head">對話時間軸</div>
+        <div class="chat-legend">左=客戶/成員 · 右=我方</div>
+        <div class="load-more-wrap" id="load-more-wrap" hidden>
+          <button class="btn small" id="load-more-btn">載入更早</button>
+        </div>
+        <div class="chat-scroll" id="chat-scroll"></div>
+      </section>
+      <section class="card team-panel">
+        <div class="card-head">💬 內部討論</div>
+        <div class="team-hint">此區內容客戶看不到,AI 會作為背景記憶納入總結</div>
+        <div class="team-scroll" id="team-scroll"></div>
+        <div class="team-err" id="team-err" hidden></div>
+        <div class="team-upload" id="team-upload" hidden>
+          <div class="upload-bar"><div class="upload-fill" id="team-upload-fill"></div></div>
+          <span class="upload-label" id="team-upload-label"></span>
+        </div>
+        <div class="team-input">
+          <div class="team-input-main">
+            <div class="mention-box" id="mention-box" hidden></div>
+            <textarea id="team-input" rows="2" placeholder="輸入內部討論…(Enter 送出,Shift+Enter 換行;輸入 @ 可提及同事或檔案)"></textarea>
+          </div>
+          <input type="file" id="team-file-input" hidden>
+          <button type="button" class="btn team-attach-btn" id="team-attach-btn" title="上傳並分享檔案">📎</button>
+          <button type="button" class="btn primary" id="team-send-btn">送出</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- 右欄:AI 總結 + 檔案牆 -->
+    <div class="col">
+      <section class="card">
+        <div class="card-head">
+          <span>AI 總結</span>
+          <button class="btn small primary" id="regen-btn">重新生成總結</button>
+        </div>
+        <div id="summary-deadline"></div>
+        <div class="card-body" id="summary-body"></div>
+      </section>
+      <section class="card">
+        <div class="card-head">
+          <span>檔案牆 <span class="sub" id="file-count"></span></span>
+          <button class="btn small primary" id="file-upload-btn">⬆ 上傳檔案</button>
+        </div>
+        <input type="file" id="file-upload-input" hidden>
+        <div class="upload-progress" id="upload-progress" hidden>
+          <div class="upload-bar"><div class="upload-fill" id="upload-fill"></div></div>
+          <span class="upload-label" id="upload-label"></span>
+        </div>
+        <div class="upload-err" id="upload-err" hidden></div>
+        <div class="card-body" id="files-body"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head collapsible" id="audit-head" role="button" tabindex="0" aria-expanded="false">
+          <span>📜 變更紀錄</span>
+          <span class="chev" id="audit-chev">▸</span>
+        </div>
+        <div class="card-body" id="audit-body" hidden></div>
+      </section>
+    </div>
+
+  </div>
+</main>
+
+<script src="api.js"></script>
+<script>
+'use strict';
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const chatId = UI.qsParam('chatId');
+  const PAGE_SIZE = 100;
+
+  // 檔案 contentHash → 下載連結(供對話中的檔案訊息點擊下載)
+  const fileLinkByHash = {};
+  let oldestTs = null;     // 目前已載入最早一筆訊息的 timestamp
+  let oldestId = null;     // 目前已載入最早一筆訊息的 id(複合游標 beforeId,避免同毫秒訊息被跳頁)
+  let hasMore = false;
+  let allMsgs = [];        // 已載入的全部訊息(時間正序);重繪時據此做「同一人連續訊息只顯示一次名字」的視覺分組
+  let custName = '';       // 客戶名稱(in 訊息缺 senderName 時的名字後備)
+  let custChatType = '';   // USER / GROUP / ROOM(群聊時成員名字加色點區分)
+
+  if (!chatId) {
+    $('page-state').innerHTML = UI.errorHtml('缺少 chatId 參數,請從客戶列表進入');
+    return;
+  }
+
+  const api = '/api/customers/' + encodeURIComponent(chatId);
+
+  // ================= 左欄:客戶資訊 =================
+  async function loadCustomer() {
+    try {
+      const data = await API.get(api);
+      const c = (data && (data.customer || data)) || {};
+      const name = c.lineName || '(未命名)';
+      custName = c.lineName || '';
+      const prevChatType = custChatType;
+      custChatType = String(c.chatType || '').toUpperCase();
+      // chatType 首次載入(或變化)會影響訊息名字的色點顯示 → 已有訊息時重繪
+      if (prevChatType !== custChatType && allMsgs.length > 0) renderTimeline(true);
+      document.title = name + ' — LINE OA 客戶進度中樞';
+      $('page-title').textContent = name;
+      $('page-sub').innerHTML = UI.chatTypeBadge(c.chatType) + ' ' + UI.stageBadge(c.currentStage);
+      $('info-body').innerHTML =
+        '<div class="info-list">' +
+        infoRow('客戶名稱', UI.esc(name)) +
+        infoRow('聊天類型', UI.chatTypeBadge(c.chatType)) +
+        infoRow('目前階段', UI.stageBadge(c.currentStage)) +
+        infoRow('待處理', c.followedUp ? '<span class="dot-followup"></span> 是' : '否') +
+        infoRow('訊息數', c.msgCount != null ? c.msgCount : '—') +
+        infoRow('檔案數', c.fileCount != null ? c.fileCount : '—') +
+        infoRow('最後訊息', UI.esc(UI.fmtDateTime(c.lastMessageAt))) +
+        infoRow('最後同步', UI.esc(UI.fmtDateTime(c.lastSyncAt))) +
+        infoRow('Chat ID', '<span style="font-size:11px;">' + UI.esc(c.lineChatId || chatId) + '</span>') +
+        '</div>';
+    } catch (e) {
+      if (e.status === 404) {
+        $('info-body').innerHTML = UI.errorHtml('找不到此客戶');
+        $('page-title').textContent = '找不到客戶';
+      } else {
+        $('info-body').innerHTML = UI.errorHtml('客戶資訊載入失敗:' + e.message);
+      }
+    }
+  }
+  function infoRow(k, vHtml) {
+    return '<div class="row"><span class="k">' + k + '</span><span class="v">' + vHtml + '</span></div>';
+  }
+
+  // ================= 左欄:記事本 =================
+  async function loadNotes() {
+    const box = $('notes-body');
+    box.innerHTML = UI.loadingHtml();
+    try {
+      const data = await API.get(api + '/notes');
+      const notes = (data && data.notes) || [];
+      if (notes.length === 0) { box.innerHTML = UI.emptyHtml('尚無記事本內容'); return; }
+      box.innerHTML = notes.map(function (n) {
+        return '<div class="note-item">' +
+          '<div class="body">' + UI.esc(n.body || '') + '</div>' +
+          '<div class="meta">' + UI.esc(UI.fmtDateTime(n.updatedAt || n.createdAt)) + '</div>' +
+          '</div>';
+      }).join('');
+    } catch (e) {
+      box.innerHTML = UI.errorHtml('記事本載入失敗:' + e.message);
+    }
+  }
+
+  // ================= 中欄:對話時間軸 =================
+  // API 回傳時間倒序;畫面由上到下為時間正序,「載入更早」在頂部往前補。
+  async function loadMessages(before, beforeId) {
+    const scroll = $('chat-scroll');
+    const btn = $('load-more-btn');
+    const firstLoad = !before;
+    if (firstLoad) scroll.innerHTML = UI.loadingHtml('載入對話…');
+    btn.disabled = true;
+    btn.textContent = '載入更早';
+
+    let msgs = [];
+    try {
+      const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
+      if (before) {
+        params.set('before', String(before));
+        // 同時帶 beforeId → 後端走 (timestamp,id) 複合游標,避免頁邊界同毫秒訊息被跳過
+        if (beforeId != null) params.set('beforeId', String(beforeId));
+      }
+      const data = await API.get(api + '/messages?' + params.toString());
+      msgs = (data && data.messages) || [];
+    } catch (e) {
+      if (firstLoad) {
+        scroll.innerHTML = UI.errorHtml('對話載入失敗:' + e.message);
+      } else {
+        btn.textContent = '載入失敗,點擊重試'; // 翻頁失敗也要有回饋
+      }
+      btn.disabled = false;
+      return;
+    }
+    btn.disabled = false;
+
+    if (firstLoad && msgs.length === 0) {
+      allMsgs = [];
+      scroll.innerHTML = UI.emptyHtml('尚無對話訊息');
+      $('load-more-wrap').hidden = true;
+      return;
+    }
+
+    hasMore = msgs.length >= PAGE_SIZE;
+    $('load-more-wrap').hidden = !hasMore;
+    if (msgs.length > 0) {
+      oldestTs = msgs[msgs.length - 1].timestamp; // 倒序:最後一筆最早
+      oldestId = msgs[msgs.length - 1].id;         // 複合游標:同毫秒時以 id 續接
+    }
+
+    // 倒序 → 正序;維護 allMsgs 全量陣列後整體重繪——
+    // 「載入更早」補頁時,原本頁首那筆的名字標籤可能因與補入的最後一筆同人而要收起,
+    // 局部 prepend 無法處理跨頁分組,整體重繪最單純可靠(頁量 100/頁,成本可忽略)
+    const page = msgs.slice().reverse();
+    if (firstLoad) {
+      allMsgs = page;
+      renderTimeline(false);
+      scroll.scrollTop = scroll.scrollHeight; // 捲到最新
+    } else {
+      allMsgs = page.concat(allMsgs);
+      const prevHeight = scroll.scrollHeight;
+      renderTimeline(false);
+      scroll.scrollTop = scroll.scrollHeight - prevHeight; // 維持視覺位置
+    }
+  }
+
+  /** 依 allMsgs 重繪整條時間軸;keepScroll=true 時維持目前捲動位置(chatType 後到重繪用) */
+  function renderTimeline(keepScroll) {
+    const scroll = $('chat-scroll');
+    const prevTop = scroll.scrollTop;
+    let html = '';
+    let prevKey = null;
+    for (let i = 0; i < allMsgs.length; i++) {
+      const m = allMsgs[i];
+      const dir = m.direction === 'out' ? 'out' : 'in';
+      // 視覺分組鍵:out 一律視為「我方」同一組;in 依 senderUserId(缺則 senderName,再缺則整組視為客戶)
+      const key = dir === 'out' ? 'out' : 'in|' + String(m.senderUserId || m.senderName || '');
+      html += renderMsg(m, dir, key !== prevKey);
+      prevKey = key;
+    }
+    scroll.innerHTML = html;
+    if (keepScroll) scroll.scrollTop = prevTop;
+  }
+
+  // 群聊成員名字 → 6 色盤色點(簡單字串 hash,同名恆同色)
+  const SENDER_COLORS = ['#e11d48', '#d97706', '#059669', '#2563eb', '#7c3aed', '#0891b2'];
+  function senderColor(name) {
+    let h = 0;
+    const s = String(name || '');
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return SENDER_COLORS[h % SENDER_COLORS.length];
+  }
+
+  /** 氣泡上方的發送者小字:out=「我方」;in=senderName(缺則客戶名);GROUP 加色點 */
+  function senderLabel(m, dir) {
+    if (dir === 'out') return '<div class="sender">我方</div>';
+    const name = m.senderName || custName || '客戶';
+    let dot = '';
+    if (custChatType === 'GROUP') {
+      dot = '<span class="sender-dot" style="background:' + senderColor(name) + '"></span>';
+    }
+    return '<div class="sender">' + dot + UI.esc(name) + '</div>';
+  }
+
+  function renderMsg(m, dir, showSender) {
+    let inner;
+    const type = (m.msgType || '').toLowerCase();
+    if (type === 'image') {
+      // 1:1 還原:已下載 → 內嵌縮圖(點擊開大圖);未下載 → 佔位
+      const url = m.contentHash && fileLinkByHash[m.contentHash];
+      if (url) {
+        inner = '<a href="' + UI.esc(url) + '" target="_blank" rel="noopener" class="chat-img-link">' +
+          '<img class="chat-img" src="' + UI.esc(url) + '" alt="圖片" loading="lazy"></a>';
+      } else {
+        inner = '<span class="media-ph">📷 圖片(同步中)</span>';
+      }
+    } else if (type === 'sticker') {
+      // 貼圖:用 stickerId 組 LINE CDN 圖(1:1 還原);缺 id 則文字佔位
+      if (m.stickerId) {
+        const su = 'https://stickershop.line-scdn.net/stickershop/v1/sticker/' +
+          encodeURIComponent(m.stickerId) + '/iPhone/sticker.png';
+        inner = '<img class="sticker-img" src="' + UI.esc(su) + '" alt="貼圖" loading="lazy" ' +
+          'onerror="this.replaceWith(document.createTextNode(\'😀 貼圖\'))">';
+      } else {
+        inner = '<span class="media-ph">😀 貼圖</span>';
+      }
+    } else if (type === 'file' || (m.fileName && type !== 'text')) {
+      const sizeStr = UI.fmtSize(m.fileSize);
+      inner = fileOrPlain(m, '📎 ' + UI.esc(m.fileName || '檔案') + (sizeStr ? '(' + sizeStr + ')' : ''), 'file-card');
+    } else if (type === 'video') {
+      inner = fileOrPlain(m, '🎬 影片', 'media-ph');
+    } else if (type === 'audio') {
+      inner = fileOrPlain(m, '🎤 語音', 'media-ph');
+    } else if (m.text) {
+      inner = UI.esc(m.text);
+    } else {
+      inner = '<span class="media-ph">[' + UI.esc(m.msgType || m.eventType || '訊息') + ']</span>';
+    }
+    let bubbleCls = 'bubble';
+    if (type === 'image' && m.contentHash && fileLinkByHash[m.contentHash]) bubbleCls += ' has-media';
+    else if (type === 'sticker' && m.stickerId) bubbleCls += ' is-sticker';
+    return '<div class="msg-row ' + dir + '"><div class="msg-col">' +
+      (showSender ? senderLabel(m, dir) : '') +
+      '<div class="' + bubbleCls + '">' + inner +
+      '<span class="time">' + UI.esc(UI.fmtDateTime(m.timestamp)) + '</span></div></div></div>';
+  }
+
+  // 有對應已下載檔案 → 可點下載;否則純文字顯示
+  function fileOrPlain(m, labelHtml, cls) {
+    const url = m.contentHash && fileLinkByHash[m.contentHash];
+    if (url) {
+      return '<a class="file-link ' + cls + '" href="' + UI.esc(url) + '" title="下載">' + labelHtml + '</a>';
+    }
+    return '<span class="' + cls + '">' + labelHtml + '</span>';
+  }
+
+  $('load-more-btn').addEventListener('click', function () {
+    if (hasMore && oldestTs != null) loadMessages(oldestTs, oldestId);
+  });
+
+  // ================= 右欄:AI 總結 =================
+  let hasSummary = false; // 是否已存在總結(決定「重新生成總結」是否帶 force)
+
+  async function loadSummary() {
+    const box = $('summary-body');
+    box.innerHTML = UI.loadingHtml();
+    try {
+      const data = await API.get(api + '/summaries');
+      const list = (data && data.summaries) || [];
+      if (list.length === 0) { renderSummary(null); return; }
+      // 保險起見依 createdAt 取最新
+      list.sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+      renderSummary(list[0]);
+    } catch (e) {
+      box.innerHTML = UI.errorHtml('總結載入失敗:' + e.message);
+    }
+  }
+
+  let currentSummary = null; // 目前顯示的總結(供編輯/批注用)
+
+  // 顯示文字:editedText 非空優先,否則 AI 原文
+  function summaryDisplayText(s) {
+    const edited = s.editedText != null ? String(s.editedText) : '';
+    return edited.trim() ? edited : (s.summaryText || '');
+  }
+  function isSummaryEdited(s) {
+    return !!(s && s.editedText != null && String(s.editedText).trim());
+  }
+
+  function renderSummary(s) {
+    const box = $('summary-body');
+    currentSummary = s;
+    hasSummary = !!s;
+    // 從未生成過總結時按鈕叫「產生總結」;已有總結才叫「重新生成總結」
+    $('regen-btn').textContent = s ? '重新生成總結' : '產生總結';
+    if (!s) {
+      box.innerHTML = UI.emptyHtml('尚無總結,點右上「產生總結」') + '<div class="summarize-err" id="summarize-err"></div>';
+      return;
+    }
+    const edited = isSummaryEdited(s);
+    let html = '';
+    html += '<div class="summary-badge-row">' + UI.stageBadge(s.stageGuess) +
+      (edited ? '<span class="edited-tag" title="人工修改版(優先於 AI 原文)">✏ 已由 ' +
+        UI.esc(s.editedByName || '同事') + ' 修改</span>' : '') + '</div>';
+    html += '<div class="summary-text" id="summary-display">' + UI.esc(summaryDisplayText(s) || '(無內容)') + '</div>';
+    html += '<div class="summary-ctrls">' +
+      '<button type="button" class="btn tiny" data-act="edit">編輯</button>' +
+      (edited ? '<button type="button" class="btn tiny" data-act="revert">還原</button>' : '') +
+      '<button type="button" class="btn tiny" data-act="annotate">批注</button>' +
+      '</div>';
+    html += renderSummaryFacts(s);
+    html += '<div class="section-title">批注</div><div id="annotations-box"><div class="anno-empty">載入中…</div></div>';
+    html += '<div class="summary-meta">產生於 ' + UI.esc(UI.fmtDateTime(s.createdAt)) +
+      (s.model ? ' · ' + UI.esc(s.model) : '') +
+      (edited && s.editedAt ? ' · 編輯於 ' + UI.esc(UI.fmtDateTime(s.editedAt)) : '') + '</div>';
+    html += '<div class="summarize-err" id="summarize-err"></div>';
+    box.innerHTML = html;
+    loadAnnotations(s.id);
+  }
+
+  // AI 原始結構化欄位(keyFacts / nextActions);人工編輯不影響
+  function renderSummaryFacts(s) {
+    let html = '';
+    const facts = UI.parseMaybeJson(s.keyFacts);
+    if (facts && typeof facts === 'object') {
+      const keys = Object.keys(facts).filter(function (k) {
+        const v = facts[k];
+        return v !== null && v !== undefined && String(v).trim() !== '';
+      });
+      if (keys.length > 0) {
+        html += '<div class="section-title">關鍵資訊</div><table class="kv-table">';
+        keys.forEach(function (k) {
+          html += '<tr><th>' + UI.esc(k) + '</th><td>' + UI.esc(String(facts[k])) + '</td></tr>';
+        });
+        html += '</table>';
+      }
+    }
+    // nextActions:[{role, action}],依角色分組(role 可能是簡體,顯示轉繁體)
+    const ROLE_MAP = { '跟单': '跟單', '跟單': '跟單', '设计': '設計', '設計': '設計', '客服': '客服', '报价': '報價', '報價': '報價' };
+    const actions = UI.parseMaybeJson(s.nextActions);
+    if (Array.isArray(actions) && actions.length > 0) {
+      const byRole = {};
+      actions.forEach(function (a) {
+        if (!a) return;
+        const role = ROLE_MAP[a.role] || a.role || '其他';
+        (byRole[role] = byRole[role] || []).push(a.action || String(a));
+      });
+      html += '<div class="section-title">建議下一步</div>';
+      Object.keys(byRole).forEach(function (role) {
+        html += '<div class="action-group"><div class="role">' + UI.esc(role) + '</div><ul>' +
+          byRole[role].map(function (act) { return '<li>' + UI.esc(act) + '</li>'; }).join('') +
+          '</ul></div>';
+      });
+    }
+    return html;
+  }
+
+  // ---- 總結:人工編輯 / 還原 / 批注 ----
+  $('summary-body').addEventListener('click', function (e) {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const act = btn.dataset.act;
+    if (act === 'edit') startEditSummary();
+    else if (act === 'revert') revertSummary();
+    else if (act === 'annotate') startAnnotation();
+  });
+
+  function startEditSummary() {
+    if (!currentSummary) return;
+    const disp = $('summary-display');
+    if (!disp || disp.querySelector('textarea')) return;
+    const cur = summaryDisplayText(currentSummary);
+    disp.textContent = '';
+    const ta = document.createElement('textarea');
+    ta.className = 'summary-edit-ta';
+    ta.rows = 7;
+    ta.value = cur;
+    const row = document.createElement('div');
+    row.className = 'summary-edit-actions';
+    const save = document.createElement('button');
+    save.type = 'button'; save.className = 'btn tiny primary'; save.textContent = '儲存';
+    const cancel = document.createElement('button');
+    cancel.type = 'button'; cancel.className = 'btn tiny'; cancel.textContent = '取消';
+    const err = document.createElement('span');
+    err.className = 'summary-edit-err';
+    row.appendChild(save); row.appendChild(cancel); row.appendChild(err);
+    disp.appendChild(ta); disp.appendChild(row);
+    ta.focus();
+    cancel.addEventListener('click', function () { renderSummary(currentSummary); });
+    save.addEventListener('click', async function () {
+      const text = ta.value.trim();
+      if (!text) { err.textContent = '內容不得為空(要清除人工版請用「還原」)'; return; }
+      save.disabled = true; cancel.disabled = true;
+      try {
+        await API.editSummary(chatId, currentSummary.id, text);
+        await loadSummary();
+        refreshAuditIfOpen();
+      } catch (e2) {
+        err.textContent = '儲存失敗:' + e2.message;
+        save.disabled = false; cancel.disabled = false;
+      }
+    });
+  }
+
+  async function revertSummary() {
+    if (!currentSummary) return;
+    if (!confirm('確定還原為 AI 原始總結?將清除人工修改內容。')) return;
+    try {
+      await API.editSummary(chatId, currentSummary.id, '');
+      await loadSummary();
+      refreshAuditIfOpen();
+    } catch (e) { alert('還原失敗:' + e.message); }
+  }
+
+  function startAnnotation() {
+    if (!currentSummary) return;
+    const box = $('annotations-box');
+    if (!box || box.querySelector('.annotation-form')) return;
+    const form = document.createElement('div');
+    form.className = 'annotation-form';
+    const ta = document.createElement('textarea');
+    ta.rows = 2; ta.placeholder = '輸入批注(不會改動總結原文)…';
+    const row = document.createElement('div');
+    row.className = 'summary-edit-actions';
+    const send = document.createElement('button');
+    send.type = 'button'; send.className = 'btn tiny primary'; send.textContent = '送出';
+    const cancel = document.createElement('button');
+    cancel.type = 'button'; cancel.className = 'btn tiny'; cancel.textContent = '取消';
+    const err = document.createElement('span');
+    err.className = 'summary-edit-err';
+    row.appendChild(send); row.appendChild(cancel); row.appendChild(err);
+    form.appendChild(ta); form.appendChild(row);
+    box.insertBefore(form, box.firstChild);
+    ta.focus();
+    cancel.addEventListener('click', function () { form.remove(); });
+    send.addEventListener('click', async function () {
+      const text = ta.value.trim();
+      if (!text) { err.textContent = '批注不得為空'; return; }
+      send.disabled = true; cancel.disabled = true;
+      try {
+        await API.addAnnotation(chatId, currentSummary.id, text);
+        loadAnnotations(currentSummary.id);
+        refreshAuditIfOpen();
+      } catch (e) {
+        err.textContent = '送出失敗:' + e.message;
+        send.disabled = false; cancel.disabled = false;
+      }
+    });
+  }
+
+  async function loadAnnotations(summaryId) {
+    const box = $('annotations-box');
+    if (!box || summaryId == null) return;
+    let list = [];
+    try {
+      const data = await API.getAnnotations(chatId, summaryId);
+      list = (data && data.annotations) || [];
+    } catch (e) {
+      box.innerHTML = '<div class="anno-empty">批注載入失敗</div>';
+      return;
+    }
+    const listHtml = list.length === 0
+      ? '<div class="anno-empty">尚無批注</div>'
+      : list.map(function (a) {
+          return '<div class="anno-item"><div class="anno-meta">' +
+            UI.esc(a.userName || '同事') + ' · ' + UI.esc(UI.fmtDateTime(a.createdAt)) +
+            '</div><div class="anno-body">' + UI.esc(a.body || '') + '</div></div>';
+        }).join('');
+    box.innerHTML = listHtml;
+  }
+
+  // 重新生成總結
+  $('regen-btn').addEventListener('click', async function () {
+    const btn = this;
+    btn.disabled = true;
+    const orig = btn.textContent;
+    btn.innerHTML = '<span class="spinner"></span> 生成中…';
+    const errBox = () => $('summarize-err');
+    if (errBox()) errBox().textContent = '';
+    try {
+      // 已有總結時(按鈕文案「重新生成總結」)必須帶 force=1:
+      // 依契約緩存規則,coveredUntilTs >= 最新訊息 timestamp 時後端直接回 cached,
+      // 不帶 force 等於點了沒點(尤其建檔回填更舊歷史後,舊總結會永久卡死)。
+      // 「產生總結」(從無總結)維持不帶 force,讓緩存規則自然放行。
+      const data = await API.post('/api/summarize/' + encodeURIComponent(chatId) + (hasSummary ? '?force=1' : ''));
+      if (data && data.summary) {
+        renderSummary(data.summary);
+      } else {
+        await loadSummary();
+      }
+      loadCustomer();  // 階段可能被更新
+      loadProgress();  // 生成總結會依 LLM 判定更新 stage_tasks 紅綠燈 → 重新載入進度面板
+    } catch (e) {
+      const msg = e.status === 503
+        ? 'LLM 未設定,請在 backend/.env 填入 OPENAI_API_KEY'
+        : '生成失敗:' + e.message;
+      if (errBox()) errBox().textContent = msg;
+      else alert(msg);
+    } finally {
+      btn.disabled = false;
+      // 成功時 renderSummary 已更新按鈕文字;若仍停在「生成中…」(失敗路徑)則還原
+      if (btn.textContent.indexOf('生成中') !== -1) btn.textContent = orig;
+    }
+  });
+
+  // ================= 右欄:檔案庫(分類 + 縮圖 + 燈箱預覽) =================
+  let allFiles = [];       // 全部檔案(已排序)
+  let fileTab = 'all';     // 目前分類篩選
+  const CAT_LABEL = { all: '全部', image: '圖片', pdf: 'PDF', design: '設計檔', doc: '文件', other: '其他' };
+  const CAT_ORDER = ['all', 'image', 'pdf', 'design', 'doc', 'other'];
+
+  // 依 mimeType + 副檔名分類
+  function classifyFile(f) {
+    const name = String(f.fileName || '').toLowerCase();
+    const mime = String(f.mimeType || '').toLowerCase();
+    const ext = name.indexOf('.') >= 0 ? name.slice(name.lastIndexOf('.') + 1) : '';
+    if (mime.indexOf('image/') === 0 || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'heic'].indexOf(ext) >= 0) return 'image';
+    if (mime === 'application/pdf' || ext === 'pdf') return 'pdf';
+    if (['ai', 'psd', 'eps', 'cdr', 'sketch', 'indd'].indexOf(ext) >= 0 || mime.indexOf('postscript') >= 0 || mime.indexOf('illustrator') >= 0) return 'design';
+    if (['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'csv', 'txt', 'odt'].indexOf(ext) >= 0) return 'doc';
+    return 'other';
+  }
+  function fileUrl(f) {
+    return fileLinkByHash[f.contentHash] || (f.downloadUrl || (f.id != null ? '/api/files/' + f.id + '/download' : '#'));
+  }
+
+  async function loadFiles() {
+    const box = $('files-body');
+    box.innerHTML = UI.loadingHtml();
+    let files = [];
+    try {
+      const data = await API.get(api + '/files');
+      files = (data && data.files) || [];
+    } catch (e) {
+      box.innerHTML = UI.errorHtml('檔案載入失敗:' + e.message);
+      return;
+    }
+    // 建 contentHash → downloadUrl 對照(對話中的檔案訊息用)
+    files.forEach(function (f) {
+      const url = f.downloadUrl || (f.id != null ? '/api/files/' + f.id + '/download' : null);
+      if (f.contentHash && url) fileLinkByHash[f.contentHash] = url;
+    });
+    files.sort(function (a, b) {
+      return (b.uploadedAt || b.downloadedAt || 0) - (a.uploadedAt || a.downloadedAt || 0);
+    });
+    files.forEach(function (f) { f._cat = classifyFile(f); });
+    allFiles = files;
+    $('file-count').textContent = files.length ? '(' + files.length + ')' : '';
+    renderFileLibrary();
+  }
+
+  function renderFileLibrary() {
+    const box = $('files-body');
+    if (allFiles.length === 0) { box.innerHTML = UI.emptyHtml('尚無檔案'); return; }
+    // 分類標籤(含數量)
+    const counts = { all: allFiles.length };
+    allFiles.forEach(function (f) { counts[f._cat] = (counts[f._cat] || 0) + 1; });
+    let tabs = '<div class="file-tabs">';
+    CAT_ORDER.forEach(function (c) {
+      if (c !== 'all' && !counts[c]) return;
+      tabs += '<button type="button" class="file-tab' + (fileTab === c ? ' active' : '') +
+        '" data-cat="' + c + '">' + CAT_LABEL[c] + ' ' + (counts[c] || 0) + '</button>';
+    });
+    tabs += '</div>';
+    const list = fileTab === 'all' ? allFiles : allFiles.filter(function (f) { return f._cat === fileTab; });
+    const grid = '<div class="file-grid">' + list.map(renderFileCard).join('') + '</div>';
+    box.innerHTML = tabs + grid;
+  }
+
+  function renderFileCard(f) {
+    const url = fileUrl(f);
+    const sizeStr = UI.fmtSize(f.fileSize);
+    const isUpload = String(f.source || '').toLowerCase() === 'upload';
+    const srcBadge = isUpload
+      ? '<span class="badge file-src src-upload" title="同事上傳">內部上傳' + (f.uploaderName ? '·' + UI.esc(f.uploaderName) : '') + '</span>'
+      : '<span class="badge file-src src-line" title="來自 LINE">LINE</span>';
+    let preview, action;
+    if (f._cat === 'image') {
+      preview = '<img class="fc-thumb" src="' + UI.esc(url) + '" alt="圖片" loading="lazy" decoding="async" data-full="' + UI.esc(url) + '" data-name="' + UI.esc(f.fileName || '') + '" onerror="this.classList.add(\'thumb-fail\')">';
+      action = '<button type="button" class="btn small block fc-open" data-full="' + UI.esc(url) + '" data-name="' + UI.esc(f.fileName || '') + '">預覽</button>';
+    } else {
+      const icon = f._cat === 'pdf' ? '📕' : f._cat === 'design' ? '🎨' : f._cat === 'doc' ? '📄' : '📎';
+      preview = '<div class="fc-icon" data-cat="' + f._cat + '">' + icon + '</div>';
+      if (f._cat === 'pdf') {
+        action = '<a class="btn small block" href="' + UI.esc(url) + '?inline=1" target="_blank" rel="noopener">開啟預覽</a>';
+      } else {
+        action = '<a class="btn small block" href="' + UI.esc(url) + '">下載</a>';
+      }
+    }
+    const displayName = f._cat === 'image' ? niceImgName(f.fileName) : (f.fileName || '(未命名)');
+    return '<div class="file-card fc-' + f._cat + '" draggable="true" data-file-id="' + UI.esc(String(f.id != null ? f.id : '')) +
+      '" data-file-name="' + UI.esc(displayName) + '">' +
+      '<div class="file-src-row">' + srcBadge + '</div>' +
+      preview +
+      '<div class="fname" title="' + UI.esc(f.fileName || '') + '">' + UI.esc(displayName) + '</div>' +
+      '<div class="fmeta">' + (sizeStr ? UI.esc(sizeStr) + ' · ' : '') + UI.esc(UI.fmtDate(f.uploadedAt || f.downloadedAt)) + '</div>' +
+      action + '</div>';
+  }
+
+  // 檔案庫互動:分類切換 + 圖片燈箱
+  $('files-body').addEventListener('click', function (e) {
+    const tab = e.target.closest('.file-tab');
+    if (tab) { fileTab = tab.getAttribute('data-cat'); renderFileLibrary(); return; }
+    const img = e.target.closest('.fc-thumb, .fc-open');
+    if (img) { openLightbox(img.getAttribute('data-full'), img.getAttribute('data-name')); }
+  });
+
+  // ---- 燈箱(圖片全屏預覽,可左右切換同類圖片,Esc/點背景關閉) ----
+  let lightboxImgs = [];
+  let lightboxIdx = 0;
+  function ensureLightbox() {
+    let lb = $('lightbox');
+    if (lb) return lb;
+    lb = document.createElement('div');
+    lb.id = 'lightbox';
+    lb.className = 'lightbox';
+    lb.hidden = true;
+    lb.innerHTML =
+      '<button type="button" class="lb-close" title="關閉">✕</button>' +
+      '<button type="button" class="lb-prev" title="上一張">‹</button>' +
+      '<img class="lb-img" alt="">' +
+      '<button type="button" class="lb-next" title="下一張">›</button>' +
+      '<div class="lb-name"></div>';
+    document.body.appendChild(lb);
+    lb.querySelector('.lb-close').addEventListener('click', closeLightbox);
+    lb.querySelector('.lb-prev').addEventListener('click', function (ev) { ev.stopPropagation(); stepLightbox(-1); });
+    lb.querySelector('.lb-next').addEventListener('click', function (ev) { ev.stopPropagation(); stepLightbox(1); });
+    lb.addEventListener('click', function (ev) { if (ev.target === lb) closeLightbox(); });
+    document.addEventListener('keydown', function (ev) {
+      if ($('lightbox').hidden) return;
+      if (ev.key === 'Escape') closeLightbox();
+      else if (ev.key === 'ArrowLeft') stepLightbox(-1);
+      else if (ev.key === 'ArrowRight') stepLightbox(1);
+    });
+    return lb;
+  }
+  function openLightbox(url, name) {
+    ensureLightbox();
+    // 收集目前顯示分類的所有圖片,供左右切換
+    const shown = fileTab === 'all' ? allFiles : allFiles.filter(function (f) { return f._cat === fileTab; });
+    lightboxImgs = shown.filter(function (f) { return f._cat === 'image'; })
+      .map(function (f) { return { url: fileUrl(f), name: f.fileName || '' }; });
+    lightboxIdx = Math.max(0, lightboxImgs.findIndex(function (x) { return x.url === url; }));
+    if (lightboxImgs.length === 0) lightboxImgs = [{ url: url, name: name || '' }];
+    showLightbox();
+  }
+  // LINE 圖片無友善檔名(存的是 contentHash),顯示「圖片」而非一長串亂碼
+  function niceImgName(name) {
+    const n = String(name || '');
+    if (!n) return '圖片';
+    // 無副檔名且過長(hash/base64 樣式)→ 視為無名
+    if (n.length > 40 && n.indexOf('.') < 0) return '圖片';
+    return n;
+  }
+  function showLightbox() {
+    const lb = $('lightbox');
+    const cur = lightboxImgs[lightboxIdx] || { url: '', name: '' };
+    lb.querySelector('.lb-img').src = cur.url;
+    lb.querySelector('.lb-name').textContent = niceImgName(cur.name) + (lightboxImgs.length > 1 ? '  (' + (lightboxIdx + 1) + '/' + lightboxImgs.length + ')' : '');
+    lb.querySelector('.lb-prev').style.visibility = lightboxImgs.length > 1 ? 'visible' : 'hidden';
+    lb.querySelector('.lb-next').style.visibility = lightboxImgs.length > 1 ? 'visible' : 'hidden';
+    lb.hidden = false;
+  }
+  function stepLightbox(d) {
+    if (lightboxImgs.length < 2) return;
+    lightboxIdx = (lightboxIdx + d + lightboxImgs.length) % lightboxImgs.length;
+    showLightbox();
+  }
+  function closeLightbox() { const lb = $('lightbox'); if (lb) lb.hidden = true; }
+
+  // ================= 建檔(按需完整同步) =================
+  // POST full-sync → pending;每 10 秒輪詢 GET full-sync;變 done 時刷新各區塊並提示。
+  let syncPollTimer = null;
+  let lastSyncStatus = null;
+
+  function renderSyncUi(st) {
+    const status = (st && st.status) || 'none';
+    $('sync-badge').innerHTML = UI.syncBadge(status);
+    const btn = $('full-sync-btn');
+    btn.hidden = false;
+    if (status === 'pending') {
+      btn.disabled = true;
+      btn.textContent = '建檔中…';
+    } else {
+      btn.disabled = false;
+      btn.textContent = status === 'error' ? '🔄 重試'
+        : (status === 'done' ? '🔄 重新建檔' : '🔄 建檔');
+    }
+    const errBox = $('sync-error');
+    if (status === 'error' && st && st.error) {
+      errBox.hidden = false;
+      errBox.textContent = '建檔失敗:' + st.error;
+      errBox.title = String(st.error);
+    } else if (status === 'pending' && st && st.error) {
+      // 依契約:插件單次失敗會留 pending 並記 error,下輪自動重試
+      errBox.hidden = false;
+      errBox.textContent = '上次嘗試失敗,將自動重試:' + st.error;
+      errBox.title = String(st.error);
+    } else {
+      errBox.hidden = true;
+      errBox.textContent = '';
+      errBox.removeAttribute('title');
+    }
+  }
+
+  async function loadSyncStatus() {
+    if (document.visibilityState === 'hidden') return; // 背景分頁暫停,回前景由 visibilitychange 補拉(與 team/bell 一致)
+    let st;
+    try {
+      st = await API.getFullSync(chatId);
+    } catch (e) {
+      return; // 查詢失敗不影響其他區塊,維持目前顯示,下次輪詢再試
+    }
+    const status = (st && st.status) || 'none';
+    const prev = lastSyncStatus;
+    lastSyncStatus = status;
+    renderSyncUi(st);
+    if (status === 'pending') startSyncPolling();
+    else stopSyncPolling();
+    if (prev === 'pending' && status === 'done') {
+      showToast('建檔完成');
+      refreshAfterSync();
+      // 後端是「先標 done、再非同步調 LLM 生成總結」(需數秒到數十秒),
+      // 上面的刷新幾乎必然搶在總結落庫之前:再對 summaries 做短期輪詢,
+      // 直到出現 createdAt >= completedAt 的新總結(或逾時),
+      // 契約「建檔完成後詳情頁自動出現總結」才不需手動刷新頁面。
+      watchForNewSummary((st && st.completedAt) || Date.now());
+    }
+  }
+
+  // ---- 建檔完成後等待自動總結落庫(每 5 秒查一次,最多 60 秒) ----
+  let summaryWatchTimer = null;
+  function watchForNewSummary(sinceTs) {
+    if (summaryWatchTimer) clearInterval(summaryWatchTimer);
+    let tries = 0;
+    summaryWatchTimer = setInterval(async function () {
+      if (document.visibilityState === 'hidden') return; // 背景分頁暫停(不計次數),回前景繼續等待
+      tries++;
+      if (tries > 12) { // 逾時:LLM 未配置或生成失敗,交由使用者手動「重新生成總結」
+        clearInterval(summaryWatchTimer);
+        summaryWatchTimer = null;
+        return;
+      }
+      try {
+        const data = await API.get(api + '/summaries');
+        const list = (data && data.summaries) || [];
+        list.sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+        if (list.length > 0 && (list[0].createdAt || 0) >= sinceTs) {
+          clearInterval(summaryWatchTimer);
+          summaryWatchTimer = null;
+          renderSummary(list[0]);
+          loadCustomer(); // 階段可能被自動總結更新
+        }
+      } catch (e) {
+        // 查詢失敗不中斷輪詢,下次再試
+      }
+    }, 5000);
+  }
+
+  function startSyncPolling() {
+    if (syncPollTimer) return;
+    syncPollTimer = setInterval(loadSyncStatus, 10000);
+  }
+  function stopSyncPolling() {
+    if (syncPollTimer) { clearInterval(syncPollTimer); syncPollTimer = null; }
+  }
+  // 回到前景時補拉一次建檔狀態(背景分頁時輪詢已暫停,與 team/bell 一致)
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') loadSyncStatus();
+  });
+
+  /** 建檔完成 → 刷新總結 / 訊息 / 檔案 / 資訊 / 記事本 */
+  function refreshAfterSync() {
+    loadCustomer();
+    loadNotes();
+    loadSummary();
+    // 先載檔案(重建 hash→連結對照)再重載訊息
+    loadFiles().then(function () { return loadMessages(null); });
+  }
+
+  $('full-sync-btn').addEventListener('click', async function () {
+    const btn = this;
+    btn.disabled = true;
+    try {
+      await API.requestFullSync(chatId);
+    } catch (e) {
+      btn.disabled = false;
+      const errBox = $('sync-error');
+      errBox.hidden = false;
+      errBox.textContent = '建檔請求送出失敗:' + e.message;
+      return;
+    }
+    lastSyncStatus = 'pending';
+    renderSyncUi({ status: 'pending' });
+    startSyncPolling();
+  });
+
+  // ================= 中欄:內部討論(客戶不可見) =================
+  // 每 10 秒 after= 增量輪詢;頁面隱藏(document.visibilityState)時暫停,回前景立即補拉。
+  const teamScroll = $('team-scroll');
+  let teamAfter = 0;        // 增量游標:GET 已取回的最大 id(只由 GET 推進,見 sendTeamMessage 註解)
+  const teamSeen = {};      // id → true:POST 回應先行插入,GET 再回同一筆時去重
+  let teamPolling = false;  // 防輪詢重疊
+  let teamInited = false;   // 首次載入(成功前顯示載入/錯誤狀態,失敗由下次輪詢重試)
+
+  function teamNearBottom() {
+    return teamScroll.scrollHeight - teamScroll.scrollTop - teamScroll.clientHeight < 48;
+  }
+  function teamScrollToBottom() { teamScroll.scrollTop = teamScroll.scrollHeight; }
+
+  function renderTeamMsg(m) {
+    const me = API.getUser();
+    const own = !!(me && m.authorName === me.name && m.authorRole === me.role);
+    const el = document.createElement('div');
+    el.className = 'team-msg' + (own ? ' own' : '');
+    el.dataset.id = m.id != null ? String(m.id) : '';
+    el.dataset.name = m.authorName || '';
+    el.dataset.role = m.authorRole || '';
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.innerHTML = UI.roleBadge(m.authorRole) +
+      '<span class="name">' + UI.esc(m.authorName || '') + '</span>' +
+      '<span class="time" title="' + UI.esc(UI.fmtDateTime(m.createdAt)) + '">' +
+      UI.esc(UI.relTime(m.createdAt)) + '</span>';
+    const body = document.createElement('div');
+    body.className = 'body';
+    // XSS:body 純文字經 renderBodyWithMentions 全程 textContent/createElement,絕不進 innerHTML
+    renderBodyWithMentions(body, m.body || '', m.mentions);
+    el.appendChild(meta);
+    el.appendChild(body);
+    return el;
+  }
+
+  /** 依 id 升序插入(去重);幾乎都是附加到底部,僅 GET 補回更早訊息時往前插 */
+  function insertTeamMsg(m) {
+    if (!m || m.id == null || teamSeen[m.id]) return false;
+    teamSeen[m.id] = true;
+    const empty = teamScroll.querySelector('.team-empty');
+    if (empty) empty.remove();
+    const el = renderTeamMsg(m);
+    let ref = null;
+    for (let i = teamScroll.children.length - 1; i >= 0; i--) {
+      const cid = Number(teamScroll.children[i].dataset.id);
+      if (!isNaN(cid) && cid > Number(m.id)) ref = teamScroll.children[i];
+      else break;
+    }
+    teamScroll.insertBefore(el, ref); // ref 為 null 時等同 append
+    return true;
+  }
+
+  async function pollTeamMessages(force) {
+    if (teamPolling) return;
+    if (!force && document.visibilityState === 'hidden') return; // 頁面隱藏時暫停
+    teamPolling = true;
+    try {
+      const data = await API.getTeamMessages(chatId, teamAfter);
+      const msgs = (data && data.messages) || [];
+      const first = !teamInited;
+      if (first) {
+        teamInited = true;
+        // 清空 DOM 的同時重置去重表:首次 GET 成功前可能已 POST 上屏(teamSeen 已標記),
+        // 不重置的話該筆會被清掉又被去重擋住、永久消失;此時 teamAfter 仍為 0,本輪會完整補回
+        teamScroll.innerHTML = '';
+        Object.keys(teamSeen).forEach(function (k) { delete teamSeen[k]; });
+      }
+      if (msgs.length > 0) {
+        const stick = first || teamNearBottom();
+        let added = false;
+        msgs.forEach(function (m) {
+          if (m && m.id != null && Number(m.id) > teamAfter) teamAfter = Number(m.id);
+          if (insertTeamMsg(m)) added = true;
+        });
+        if (added && stick) teamScrollToBottom();
+      }
+      if (teamScroll.children.length === 0) {
+        teamScroll.innerHTML = '<div class="team-empty">尚無內部討論,輸入第一則訊息吧</div>';
+      }
+    } catch (e) {
+      if (!teamInited) {
+        // 首次載入失敗:顯示錯誤,teamInited 維持 false,下次輪詢自動重試
+        teamScroll.innerHTML = UI.errorHtml('內部討論載入失敗:' + e.message);
+      }
+      // 已載入後的輪詢失敗保持靜默,下次輪詢再試(與建檔輪詢一致)
+    } finally {
+      teamPolling = false;
+    }
+  }
+
+  async function sendTeamMessage() {
+    const ta = $('team-input');
+    const body = ta.value.trim();
+    if (!body) return; // 契約:去空白後不得為空
+    const btn = $('team-send-btn');
+    btn.disabled = true;
+    ta.disabled = true;
+    try {
+      // 發言人身分由後端依 session 強制覆蓋,前端只送 body + 結構化 mentions。
+      // 只保留仍出現在 body 內的 @提及(使用者可能已刪掉插入的名字),並去重。
+      const mentions = collectMentions(body);
+      const payload = { body: body };
+      if (mentions.length) payload.mentions = mentions;
+      const data = await API.postTeamMessage(chatId, payload);
+      ta.value = '';
+      pendingMentions = [];
+      hideMentionBox();
+      if (data && data.message) {
+        // 立即上屏;故意不推進 teamAfter 游標——若別人在同一輪詢間隔內發了
+        // 更小 id 的訊息,游標跳過去會永久漏訊,交由下次 GET 補齊 + teamSeen 去重
+        insertTeamMsg(data.message);
+        teamScrollToBottom();
+      } else {
+        pollTeamMessages(true);
+      }
+      $('team-err').hidden = true;
+      $('team-err').textContent = '';
+    } catch (e) {
+      const errBox = $('team-err');
+      errBox.hidden = false;
+      errBox.textContent = '送出失敗:' + e.message;
+    } finally {
+      btn.disabled = false;
+      ta.disabled = false;
+      ta.focus();
+    }
+  }
+
+  $('team-send-btn').addEventListener('click', sendTeamMessage);
+  $('team-input').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.isComposing || e.keyCode === 229) return; // 輸入法選字中的 Enter 不送出
+      e.preventDefault();
+      sendTeamMessage();
+    }
+  });
+
+  setInterval(function () { pollTeamMessages(false); }, 10000);
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') pollTeamMessages(false);
+  });
+
+  // ---- toast 提示 ----
+  let toastTimer = null;
+  function showToast(text) {
+    let el = document.getElementById('toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'toast';
+      el.className = 'toast';
+      document.body.appendChild(el);
+    }
+    el.textContent = text;
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove('show'); }, 4000);
+  }
+
+  // ================= 小工具(進度/提及共用) =================
+  function cssEsc(s) {
+    if (window.CSS && CSS.escape) return CSS.escape(String(s));
+    return String(s).replace(/["\\\]]/g, '\\$&');
+  }
+  function p2(n) { return n < 10 ? '0' + n : '' + n; }
+  function msToDateInput(ms) {
+    if (!ms) return '';
+    const d = new Date(Number(ms));
+    if (isNaN(d.getTime())) return '';
+    return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate());
+  }
+  function dateInputToMs(str) {
+    if (!str) return null;
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(str);
+    if (!m) return null;
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return isNaN(d.getTime()) ? null : d.getTime();
+  }
+
+  // ================= 進度面板 =================
+  const STAGE_FLOW = ['洽談', '已回簽', '已打樣', '已出廠', '已交付'];
+  let progressData = null;
+  const expandedStages = {};   // stage → true(展開)
+  const metaTextDebounce = {}; // 物流文字欄位各自 debounce
+
+  // 階段鎖定下拉(選項固定,只在此建一次)
+  (function initOverrideSelect() {
+    const sel = $('stage-override');
+    const opts = [{ v: '', t: '自動(依任務)' }].concat(
+      STAGE_FLOW.map(function (s) { return { v: s, t: s }; })
+    );
+    sel.innerHTML = opts.map(function (o) {
+      return '<option value="' + UI.esc(o.v) + '">' + UI.esc(o.t) + '</option>';
+    }).join('');
+    sel.addEventListener('change', async function () {
+      const val = sel.value;
+      sel.disabled = true;
+      try {
+        const data = await API.putMeta(chatId, { stageOverride: val });
+        if (data && data.progress) {
+          progressData = data.progress;
+          renderStageOverrideState(data.progress);
+          renderProgress(data.progress);
+        } else {
+          await loadProgress();
+        }
+        loadCustomer();       // 階段徽章同步
+        refreshAuditIfOpen();
+      } catch (e) {
+        alert('階段鎖定失敗:' + e.message);
+        renderStageOverrideState(progressData);
+      } finally {
+        sel.disabled = false;
+      }
+    });
+  })();
+
+  async function loadProgress() {
+    let p;
+    try {
+      p = await API.getProgress(chatId);
+    } catch (e) {
+      $('progress-card').hidden = false;
+      $('progress-body').innerHTML = UI.errorHtml('進度載入失敗:' + e.message);
+      return;
+    }
+    progressData = p;
+    if (Object.keys(expandedStages).length === 0 && p.currentStage) {
+      expandedStages[p.currentStage] = true; // 首次預設展開當前階段
+    }
+    $('progress-card').hidden = false;
+    renderStageOverrideState(p);
+    renderProgress(p);
+    // 大貨死線橫幅:總結面板最上方也顯示一份(進度面板頂部由 renderProgress 內含)
+    $('summary-deadline').innerHTML = deadlineBannerHtml(p);
+  }
+
+  // 大貨死線橫幅:醒目倒數 / 逾期警示;無死線顯示「設定」。點擊「設定/修改」→ 選日期
+  function deadlineBannerHtml(p) {
+    const d = (p && p.deadline) || {};
+    if (d.at) {
+      const dl = d.daysLeft;
+      let cls = 'dl-ok', tag;
+      if (dl < 0) { cls = 'dl-over'; tag = '已逾期 ' + Math.abs(dl) + ' 天'; }
+      else if (dl === 0) { cls = 'dl-today'; tag = '今天到期!'; }
+      else if (dl <= 7) { cls = 'dl-soon'; tag = '剩 ' + dl + ' 天'; }
+      else { tag = '剩 ' + dl + ' 天'; }
+      const src = d.source === 'manual' ? '人工' : 'AI';
+      return '<div class="deadline-banner ' + cls + '">' +
+        '<span class="dl-ico">⏰</span>' +
+        '<span class="dl-main">大貨死線 ' + UI.esc(UI.fmtDate(d.at)) + '</span>' +
+        '<span class="dl-tag">' + UI.esc(tag) + '</span>' +
+        '<button type="button" class="dl-edit" title="修改死線(' + src + '設定)">✎</button>' +
+        (d.evidence ? '<div class="dl-evi">🔍 ' + UI.esc(d.evidence) + '</div>' : '') +
+        '</div>';
+    }
+    return '<div class="deadline-banner dl-none">' +
+      '<span class="dl-ico">⏰</span>' +
+      '<span class="dl-main">尚未設定大貨死線</span>' +
+      '<button type="button" class="dl-edit primary">設定死線</button>' +
+      '</div>';
+  }
+
+  // 死線橫幅「設定/修改」點擊(委派到 document,涵蓋總結面板與進度面板兩處)
+  document.addEventListener('click', function (e) {
+    const btn = e.target.closest('.dl-edit');
+    if (!btn) return;
+    setDeadlinePrompt();
+  });
+  async function setDeadlinePrompt() {
+    const cur = progressData && progressData.deadline && progressData.deadline.at
+      ? msToDateInput(progressData.deadline.at) : '';
+    const input = window.prompt('輸入大貨交期死線(格式 YYYY-MM-DD,例 2026-08-15)。清空則移除:', cur);
+    if (input === null) return;
+    const trimmed = input.trim();
+    let deadlineAt = null;
+    if (trimmed) {
+      const ms = dateInputToMs(trimmed);
+      if (!ms) { alert('日期格式不正確,請用 YYYY-MM-DD'); return; }
+      deadlineAt = ms;
+    }
+    try {
+      const data = await API.putMeta(chatId, { deadlineAt: deadlineAt });
+      if (data && data.progress) { progressData = data.progress; loadProgress(); }
+      refreshAuditIfOpen();
+    } catch (e) { alert('設定死線失敗:' + e.message); }
+  }
+
+  function renderStageOverrideState(p) {
+    const sel = $('stage-override');
+    if (!sel || !p) return;
+    sel.value = p.stageOverride || '';
+    sel.classList.toggle('locked', !!p.stageOverride);
+  }
+
+  function renderProgress(p) {
+    const body = $('progress-body');
+    const stages = (p.stages && p.stages.length)
+      ? p.stages
+      : STAGE_FLOW.map(function (s) { return { stage: s, tasks: [] }; });
+    const curIdx = STAGE_FLOW.indexOf(p.currentStage);
+
+    // 大貨死線橫幅(貫穿進度:置於步驟條上方)
+    let step = deadlineBannerHtml(p);
+    // 步驟條
+    step += '<div class="stepper">';
+    STAGE_FLOW.forEach(function (s, i) {
+      let cls = 'step';
+      if (curIdx >= 0 && i < curIdx) cls += ' done';
+      else if (i === curIdx) cls += ' current';
+      step += '<button type="button" class="' + cls + '" data-stagestep="' + UI.esc(s) + '">' +
+        '<span class="step-idx">' + (i + 1) + '</span>' +
+        '<span class="step-name">' + UI.esc(s) + '</span></button>';
+      if (i < STAGE_FLOW.length - 1) {
+        step += '<span class="step-line' + (curIdx >= 0 && i < curIdx ? ' done' : '') + '"></span>';
+      }
+    });
+    step += '</div>';
+    if (p.stageOverride) {
+      step += '<div class="stage-lock-note">🔒 已手動鎖定為「' + UI.esc(p.stageOverride) +
+        '」,不隨任務自動推進</div>';
+    }
+
+    // 手風琴:每階段任務 + 參數
+    let acc = '<div class="stage-acc">';
+    stages.forEach(function (st) {
+      const stage = st.stage;
+      const open = !!expandedStages[stage];
+      const tasks = st.tasks || [];
+      const doneCount = tasks.filter(function (t) { return t.done; }).length;
+      acc += '<div class="stage-block' + (stage === p.currentStage ? ' is-current' : '') +
+        '" data-stage="' + UI.esc(stage) + '">';
+      acc += '<button type="button" class="stage-block-head" data-toggle="' + UI.esc(stage) +
+        '" aria-expanded="' + open + '">' +
+        '<span class="chev">' + (open ? '▾' : '▸') + '</span>' +
+        '<span class="stage-block-name">' + UI.esc(stage) + '</span>' +
+        '<span class="stage-block-count">' + doneCount + '/' + tasks.length + '</span></button>';
+      acc += '<div class="stage-block-body"' + (open ? '' : ' hidden') + '>';
+      acc += renderTaskList(tasks);
+      acc += renderStageParams(stage, p);
+      acc += '</div></div>';
+    });
+    acc += '</div>';
+    body.innerHTML = step + acc;
+  }
+
+  function renderTaskList(tasks) {
+    if (!tasks.length) return '<div class="task-empty">此階段無任務</div>';
+    return '<div class="task-list">' + tasks.map(function (t) {
+      const done = !!t.done;
+      const manual = t.source === 'manual';
+      const evi = t.evidence || '';
+      return '<div class="task-row-wrap">' +
+        '<div class="task-row">' +
+        '<button type="button" class="task-light ' + (done ? 'on' : 'off') + '" ' +
+        'data-task="' + UI.esc(t.taskKey) + '" data-done="' + (done ? '1' : '0') + '" ' +
+        'title="' + (done ? '已完成,點擊改為未完成' : '未完成,點擊標記完成') + '">' +
+        (done ? '🟢' : '🔴') + '</button>' +
+        '<span class="task-label">' + UI.esc(t.label) + '</span>' +
+        (manual ? '<span class="task-src">手動</span>' : '') +
+        '<button type="button" class="task-evi-edit" data-task="' + UI.esc(t.taskKey) + '" ' +
+        'data-done="' + (done ? '1' : '0') + '" data-evi="' + UI.esc(evi) + '" ' +
+        'title="補充/修改證據">✎</button>' +
+        '</div>' +
+        (evi ? '<div class="task-evi-line">🔍 證據:' + UI.esc(evi) + '</div>' : '') +
+        '</div>';
+    }).join('') + '</div>';
+  }
+
+  function renderStageParams(stage, p) {
+    const meta = p.meta || {};
+    const exp = p.expected || {};
+    if (stage === '已回簽') {
+      return paramLeadBlock('打樣天數', 'sampleLeadDays', meta.sampleLeadDays,
+        'sampleStartAt', meta.sampleStartAt, exp.sampleDueAt);
+    }
+    if (stage === '已打樣') {
+      return paramLeadBlock('生產天數', 'productionLeadDays', meta.productionLeadDays,
+        'productionStartAt', meta.productionStartAt, exp.productionDueAt);
+    }
+    if (stage === '已出廠') {
+      return '<div class="stage-params logistics">' +
+        logisticsRow('物流商', 'logisticsProvider', meta.logisticsProvider, '例:順豐 / 貨運行') +
+        logisticsRow('物流單號', 'logisticsTrackingNo', meta.logisticsTrackingNo, '追蹤號 / 報關單號') +
+        logisticsRow('備註', 'logisticsNote', meta.logisticsNote, '報關 / 收件 / 其他備註') +
+        '</div>';
+    }
+    return '';
+  }
+
+  function paramLeadBlock(daysLabel, daysKey, daysVal, startKey, startVal, dueAt) {
+    return '<div class="stage-params">' +
+      '<div class="param-row"><label>' + UI.esc(daysLabel) + '</label>' +
+      '<input type="number" min="0" class="meta-num" data-meta="' + daysKey + '" value="' +
+      (daysVal != null ? UI.esc(String(daysVal)) : '') + '" placeholder="天數"></div>' +
+      '<div class="param-row"><label>起始日</label>' +
+      '<input type="date" class="meta-date" data-meta="' + startKey + '" value="' +
+      UI.esc(msToDateInput(startVal)) + '"></div>' +
+      '<div class="param-row"><label>預計完成</label>' +
+      '<span class="param-due">' + (dueAt ? UI.esc(UI.fmtDate(dueAt)) : '—') + '</span></div>' +
+      '</div>';
+  }
+  function logisticsRow(label, key, val, ph) {
+    return '<div class="param-row"><label>' + UI.esc(label) + '</label>' +
+      '<input type="text" class="meta-text" data-meta="' + key + '" value="' +
+      UI.esc(val || '') + '" placeholder="' + UI.esc(ph) + '"></div>';
+  }
+
+  // 進度面板事件委派
+  $('progress-body').addEventListener('click', function (e) {
+    const eviBtn = e.target.closest('.task-evi-edit');
+    if (eviBtn) { editTaskEvidence(eviBtn); return; }
+    const light = e.target.closest('.task-light');
+    if (light) { toggleTask(light); return; }
+    const head = e.target.closest('.stage-block-head');
+    if (head) { toggleStageBlock(head.dataset.toggle); return; }
+    const step = e.target.closest('[data-stagestep]');
+    if (step) { openStageBlock(step.dataset.stagestep); return; }
+  });
+  $('progress-body').addEventListener('change', function (e) {
+    const el = e.target;
+    if (!el.classList) return;
+    if (el.classList.contains('meta-num')) {
+      const v = el.value.trim();
+      commitMeta(el.dataset.meta, v === '' ? '' : Number(v), true);
+    } else if (el.classList.contains('meta-date')) {
+      commitMeta(el.dataset.meta, dateInputToMs(el.value), true);
+    }
+  });
+  $('progress-body').addEventListener('input', function (e) {
+    const el = e.target;
+    if (el.classList && el.classList.contains('meta-text')) {
+      const key = el.dataset.meta;
+      const val = el.value;
+      clearTimeout(metaTextDebounce[key]);
+      metaTextDebounce[key] = setTimeout(function () { commitMeta(key, val, false); }, 600);
+    }
+  });
+
+  function toggleStageBlock(stage) {
+    expandedStages[stage] = !expandedStages[stage];
+    if (progressData) renderProgress(progressData);
+  }
+  function openStageBlock(stage) {
+    expandedStages[stage] = true;
+    if (progressData) renderProgress(progressData);
+    const block = $('progress-body').querySelector('.stage-block[data-stage="' + cssEsc(stage) + '"]');
+    if (block) block.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  async function toggleTask(btn) {
+    const taskKey = btn.dataset.task;
+    const newDone = btn.dataset.done !== '1';
+    btn.disabled = true;
+    try {
+      await API.putTask(chatId, taskKey, newDone);
+      await loadProgress();  // currentStage 可能推進 → 整體重繪(保留展開狀態)
+      loadCustomer();        // 頂欄/資訊階段徽章同步
+      refreshAuditIfOpen();
+    } catch (e) {
+      btn.disabled = false;
+      alert('切換失敗:' + e.message);
+    }
+  }
+
+  // 人工補/改任務證據(說明為何達成此階段任務);done 維持現狀
+  async function editTaskEvidence(btn) {
+    const taskKey = btn.dataset.task;
+    const done = btn.dataset.done === '1';
+    const cur = btn.dataset.evi || '';
+    const input = window.prompt('補充/修改此任務的證據(例:客戶 7/1『已用印 請收』)。清空則移除證據:', cur);
+    if (input === null) return; // 取消
+    try {
+      await API.putTask(chatId, taskKey, done, input); // 帶 evidence(第 4 參數)
+      await loadProgress();
+      refreshAuditIfOpen();
+    } catch (e) {
+      alert('儲存證據失敗:' + e.message);
+    }
+  }
+
+  // rerender=true(天數/起始日,會改預計完成)才整體重繪;物流文字不重繪以免打字中失焦
+  async function commitMeta(key, value, rerender) {
+    const patch = {};
+    patch[key] = value;
+    try {
+      const data = await API.putMeta(chatId, patch);
+      if (data && data.progress) {
+        progressData = data.progress;
+        renderStageOverrideState(data.progress);
+        if (rerender) renderProgress(data.progress);
+      }
+      refreshAuditIfOpen();
+    } catch (e) {
+      alert('儲存失敗:' + e.message);
+    }
+  }
+
+  // ================= @ 提及自動完成 + 收集 =================
+  const mentionInput = $('team-input');
+  const mentionBox = $('mention-box');
+  let pendingMentions = []; // {kind,targetUserId?,targetFileId?,label}
+  let mentionAnchor = null; // {start,q}
+  let mentionItems = [];    // 目前顯示的候選(扁平)
+  let mentionSel = 0;
+
+  // 收集仍出現在 body 內的 @提及(去重),供送出時帶上
+  function collectMentions(body) {
+    const out = [];
+    const seen = {};
+    pendingMentions.forEach(function (m) {
+      if (body.indexOf('@' + m.label) === -1) return;
+      const key = m.kind + ':' + (m.kind === 'file' ? m.targetFileId : m.targetUserId);
+      if (seen[key]) return;
+      seen[key] = true;
+      out.push(m.kind === 'file'
+        ? { kind: 'file', targetFileId: m.targetFileId }
+        : { kind: 'user', targetUserId: m.targetUserId });
+    });
+    return out;
+  }
+
+  // 光標前的 @token:@ 前須為開頭或空白,token 內不含空白/@
+  function currentMentionAnchor() {
+    const val = mentionInput.value;
+    const pos = mentionInput.selectionStart;
+    if (pos == null) return null;
+    let i = pos - 1;
+    while (i >= 0) {
+      const ch = val.charAt(i);
+      if (ch === '@') {
+        const prev = i > 0 ? val.charAt(i - 1) : '';
+        if (i === 0 || /\s/.test(prev)) {
+          const q = val.slice(i + 1, pos);
+          if (/[\s@]/.test(q)) return null;
+          return { start: i, q: q };
+        }
+        return null;
+      }
+      if (/\s/.test(ch)) return null;
+      i--;
+    }
+    return null;
+  }
+
+  const doSuggest = UI.debounce(async function (anchor) {
+    let data;
+    try { data = await API.suggestMentions(chatId, anchor.q); }
+    catch (e) { hideMentionBox(); return; }
+    const now = currentMentionAnchor();
+    if (!now || now.start !== anchor.start) return; // 使用者已改變輸入
+    showMentionBox(data);
+  }, 200);
+
+  mentionInput.addEventListener('input', function () {
+    const anchor = currentMentionAnchor();
+    if (!anchor) { hideMentionBox(); return; }
+    mentionAnchor = anchor;
+    doSuggest(anchor);
+  });
+  // 捕獲階段攔截:選單開著時 ↑↓/Enter/Tab/Esc 操作候選,不觸發送出
+  mentionInput.addEventListener('keydown', function (e) {
+    if (mentionBox.hidden) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); e.stopImmediatePropagation(); moveMentionSel(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); e.stopImmediatePropagation(); moveMentionSel(-1); }
+    else if (e.key === 'Enter') {
+      if (e.isComposing || e.keyCode === 229) return;
+      e.preventDefault(); e.stopImmediatePropagation(); applyMention(mentionSel);
+    } else if (e.key === 'Tab') { e.preventDefault(); e.stopImmediatePropagation(); applyMention(mentionSel); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); hideMentionBox(); }
+  }, true);
+  mentionInput.addEventListener('blur', function () {
+    setTimeout(hideMentionBox, 120); // 讓 mousedown 選取先完成
+  });
+
+  function showMentionBox(data) {
+    const users = (data && data.users) || [];
+    const files = (data && data.files) || [];
+    mentionItems = [];
+    let html = '';
+    if (users.length) {
+      html += '<div class="mention-group-title">同事</div>';
+      users.forEach(function (u) {
+        const label = u.displayName || u.name || '';
+        const idx = mentionItems.length;
+        mentionItems.push({ kind: 'user', targetUserId: u.id, label: label });
+        html += '<div class="mention-row" data-idx="' + idx + '">' +
+          '<span class="mention-row-text">@' + UI.esc(label) + '</span>' +
+          (u.role ? UI.roleBadge(u.role) : '') + '</div>';
+      });
+    }
+    if (files.length) {
+      html += '<div class="mention-group-title">檔案</div>';
+      files.forEach(function (f) {
+        const label = f.fileName || '';
+        const idx = mentionItems.length;
+        mentionItems.push({ kind: 'file', targetFileId: f.id, label: label });
+        html += '<div class="mention-row" data-idx="' + idx + '">' +
+          '<span class="mention-row-text">📎 ' + UI.esc(label) + '</span></div>';
+      });
+    }
+    if (mentionItems.length === 0) { hideMentionBox(); return; }
+    mentionSel = 0;
+    mentionBox.innerHTML = html;
+    mentionBox.hidden = false;
+    highlightMentionSel();
+    Array.prototype.forEach.call(mentionBox.querySelectorAll('.mention-row'), function (row) {
+      row.addEventListener('mousedown', function (e) {
+        e.preventDefault(); // 別讓 textarea 失焦
+        applyMention(Number(row.dataset.idx));
+      });
+    });
+  }
+
+  function moveMentionSel(d) {
+    if (!mentionItems.length) return;
+    mentionSel = (mentionSel + d + mentionItems.length) % mentionItems.length;
+    highlightMentionSel();
+  }
+  function highlightMentionSel() {
+    Array.prototype.forEach.call(mentionBox.querySelectorAll('.mention-row'), function (row) {
+      row.classList.toggle('sel', Number(row.dataset.idx) === mentionSel);
+    });
+    const cur = mentionBox.querySelector('.mention-row.sel');
+    if (cur) cur.scrollIntoView({ block: 'nearest' });
+  }
+  function hideMentionBox() {
+    mentionBox.hidden = true;
+    mentionItems = [];
+  }
+
+  function applyMention(idx) {
+    const item = mentionItems[idx];
+    if (!item) { hideMentionBox(); return; }
+    const anchor = currentMentionAnchor() || mentionAnchor;
+    if (!anchor) { hideMentionBox(); return; }
+    const val = mentionInput.value;
+    const pos = mentionInput.selectionStart;
+    const insert = '@' + item.label + ' ';
+    const before = val.slice(0, anchor.start);
+    const after = val.slice(pos);
+    mentionInput.value = before + insert + after;
+    const caret = (before + insert).length;
+    mentionInput.setSelectionRange(caret, caret);
+    pendingMentions.push({
+      kind: item.kind, targetUserId: item.targetUserId,
+      targetFileId: item.targetFileId, label: item.label
+    });
+    hideMentionBox();
+    mentionInput.focus();
+  }
+
+  // 依 mentions 陣列把 body 中的 @名字 / 📎檔名 高亮(全程 textContent/createElement,無 XSS)
+  function mentionLabel(m) {
+    if (!m) return '';
+    if (m.kind === 'file') return m.label || m.fileName || m.name || m.targetFileName || '';
+    return m.label || m.name || m.displayName || m.targetName || m.userName || '';
+  }
+  function renderBodyWithMentions(el, text, mentions) {
+    el.textContent = '';
+    text = text || '';
+    const toks = [];
+    (mentions || []).forEach(function (m) {
+      const label = mentionLabel(m);
+      if (!label) return;
+      if (m.kind === 'file') {
+        toks.push({ t: '📎 ' + label, kind: 'file', fileId: m.targetFileId });
+        toks.push({ t: '@' + label, kind: 'file', fileId: m.targetFileId });
+      } else {
+        toks.push({ t: '@' + label, kind: 'user' });
+      }
+    });
+    if (!toks.length) { el.textContent = text; return; }
+    toks.sort(function (a, b) { return b.t.length - a.t.length; }); // 長標籤優先
+    let buf = '';
+    function flush() { if (buf) { el.appendChild(document.createTextNode(buf)); buf = ''; } }
+    let i = 0;
+    while (i < text.length) {
+      let matched = null;
+      for (let k = 0; k < toks.length; k++) {
+        if (toks[k].t && text.startsWith(toks[k].t, i)) { matched = toks[k]; break; }
+      }
+      if (matched) {
+        flush();
+        const span = document.createElement('span');
+        if (matched.kind === 'file') {
+          span.className = 'mention mention-file';
+          span.dataset.fileId = matched.fileId != null ? String(matched.fileId) : '';
+          span.title = '點擊跳至檔案牆';
+        } else {
+          span.className = 'mention mention-user';
+        }
+        span.textContent = matched.t;
+        el.appendChild(span);
+        i += matched.t.length;
+      } else {
+        buf += text.charAt(i);
+        i++;
+      }
+    }
+    flush();
+  }
+
+  // 點 @檔案 → 跳檔案牆並閃爍該卡
+  teamScroll.addEventListener('click', function (e) {
+    const mf = e.target.closest('.mention-file');
+    if (!mf) return;
+    const fid = mf.dataset.fileId;
+    if (fid) jumpToFile(fid);
+  });
+  function jumpToFile(fileId) {
+    const card = $('files-body').querySelector('.file-card[data-file-id="' + cssEsc(String(fileId)) + '"]');
+    if (!card) return;
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.add('flash');
+    setTimeout(function () { card.classList.remove('flash'); }, 1600);
+  }
+
+  // ================= 檔案上傳(檔案牆) =================
+  $('file-upload-btn').addEventListener('click', function () { $('file-upload-input').click(); });
+  $('file-upload-input').addEventListener('change', function () {
+    const f = this.files && this.files[0];
+    this.value = '';
+    if (f) doFileUpload(f);
+  });
+  async function doFileUpload(file) {
+    const wrap = $('upload-progress');
+    const fill = $('upload-fill');
+    const label = $('upload-label');
+    const err = $('upload-err');
+    const btn = $('file-upload-btn');
+    err.hidden = true; err.textContent = '';
+    wrap.hidden = false; fill.style.width = '0%'; label.textContent = '上傳中… 0%';
+    btn.disabled = true;
+    try {
+      await API.uploadFile(chatId, file, function (r) {
+        const pct = Math.round(r * 100);
+        fill.style.width = pct + '%';
+        label.textContent = '上傳中… ' + pct + '%';
+      });
+      fill.style.width = '100%'; label.textContent = '完成';
+      setTimeout(function () { wrap.hidden = true; }, 800);
+      await loadFiles();
+      loadCustomer(); // 檔案數更新
+    } catch (e) {
+      wrap.hidden = true;
+      err.hidden = false;
+      err.textContent = '上傳失敗:' + e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // ================= 討論框 📎 上傳並分享 =================
+  $('team-attach-btn').addEventListener('click', function () { $('team-file-input').click(); });
+  $('team-file-input').addEventListener('change', function () {
+    const f = this.files && this.files[0];
+    this.value = '';
+    if (f) doTeamAttach(f);
+  });
+  async function doTeamAttach(file) {
+    const wrap = $('team-upload');
+    const fill = $('team-upload-fill');
+    const label = $('team-upload-label');
+    const btn = $('team-attach-btn');
+    const errBox = $('team-err');
+    wrap.hidden = false; fill.style.width = '0%'; label.textContent = '上傳中… 0%';
+    btn.disabled = true;
+    let uploaded;
+    try {
+      uploaded = await API.uploadFile(chatId, file, function (r) {
+        const pct = Math.round(r * 100);
+        fill.style.width = pct + '%'; label.textContent = '上傳中… ' + pct + '%';
+      });
+    } catch (e) {
+      wrap.hidden = true; btn.disabled = false;
+      errBox.hidden = false; errBox.textContent = '檔案上傳失敗:' + e.message;
+      return;
+    }
+    wrap.hidden = true; btn.disabled = false;
+    const fileObj = (uploaded && uploaded.file) || {};
+    const fileName = fileObj.fileName || file.name;
+    loadFiles();    // 顯示新檔(source='upload')
+    loadCustomer(); // 檔案數
+    // 自動送出討論訊息:body 預填「📎 檔名」+ file mention
+    try {
+      const payload = { body: '📎 ' + fileName };
+      if (fileObj.id != null) payload.mentions = [{ kind: 'file', targetFileId: fileObj.id }];
+      const data = await API.postTeamMessage(chatId, payload);
+      if (data && data.message) { insertTeamMsg(data.message); teamScrollToBottom(); }
+      else pollTeamMessages(true);
+      errBox.hidden = true; errBox.textContent = '';
+    } catch (e) {
+      errBox.hidden = false; errBox.textContent = '分享到討論失敗:' + e.message;
+    }
+  }
+
+  // ---- 檔案庫「拖曳到討論區」分享既有檔案(不重新上傳) ----
+  // 拖曳來源:檔案卡(files-body 委派 dragstart)
+  $('files-body').addEventListener('dragstart', function (e) {
+    const card = e.target.closest('.file-card');
+    if (!card) return;
+    const id = card.getAttribute('data-file-id');
+    const name = card.getAttribute('data-file-name') || '檔案';
+    if (!id) return;
+    e.dataTransfer.setData('application/x-lineoa-file', JSON.stringify({ id: id, name: name }));
+    e.dataTransfer.effectAllowed = 'copy';
+  });
+  // 放置目標:內部討論面板
+  (function () {
+    const panel = document.querySelector('.team-panel');
+    if (!panel) return;
+    function hasFile(e) {
+      return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'application/x-lineoa-file') >= 0;
+    }
+    panel.addEventListener('dragover', function (e) {
+      if (!hasFile(e)) return;
+      e.preventDefault(); e.dataTransfer.dropEffect = 'copy';
+      panel.classList.add('drop-hover');
+    });
+    panel.addEventListener('dragleave', function (e) {
+      if (e.target === panel || !panel.contains(e.relatedTarget)) panel.classList.remove('drop-hover');
+    });
+    panel.addEventListener('drop', function (e) {
+      panel.classList.remove('drop-hover');
+      const raw = e.dataTransfer.getData('application/x-lineoa-file');
+      if (!raw) return;
+      e.preventDefault();
+      let obj; try { obj = JSON.parse(raw); } catch (x) { return; }
+      const fid = parseInt(obj.id, 10);
+      if (!isFinite(fid)) return;
+      shareExistingFile(fid, obj.name || '檔案');
+    });
+  })();
+  // 分享既有檔案到討論:送一則「📎 檔名」+ file mention(檔案已在庫,不上傳)
+  async function shareExistingFile(fileId, fileName) {
+    const errBox = $('team-err');
+    try {
+      const data = await API.postTeamMessage(chatId, { body: '📎 ' + fileName, mentions: [{ kind: 'file', targetFileId: fileId }] });
+      if (data && data.message) { insertTeamMsg(data.message); teamScrollToBottom(); }
+      else pollTeamMessages(true);
+      if (errBox) { errBox.hidden = true; errBox.textContent = ''; }
+    } catch (e) {
+      if (errBox) { errBox.hidden = false; errBox.textContent = '分享到討論失敗:' + e.message; }
+    }
+  }
+
+  // ================= 變更紀錄(審計) =================
+  const AUDIT_ACTION = {
+    stage_task_toggle: '切換階段任務',
+    stage_meta_edit: '修改階段參數',
+    stage_override: '鎖定/解鎖階段',
+    summary_edit: '編輯總結',
+    summary_annotate: '新增批注',
+    summary_regenerate: '重新生成總結',
+    file_upload: '上傳檔案',
+    team_mention: '討論中提及'
+  };
+  function auditDetailText(l) {
+    const d = UI.parseMaybeJson(l.detail);
+    if (!d) return typeof l.detail === 'string' ? l.detail : '';
+    if (l.action === 'stage_task_toggle') {
+      return (d.stage ? d.stage + ' · ' : '') + (d.to ? '完成 ✓' : '取消 ✗');
+    }
+    if (l.action === 'stage_override') {
+      return d.to ? ('鎖定為「' + d.to + '」') : '解除鎖定(改為自動)';
+    }
+    if (l.action === 'summary_edit') {
+      return d.revert ? '還原為 AI 原文' : '存為人工修改版';
+    }
+    return '';
+  }
+  function renderAuditRow(l) {
+    const label = AUDIT_ACTION[l.action] || l.action || '變更';
+    const detail = auditDetailText(l);
+    return '<div class="audit-item">' +
+      '<div class="audit-top"><span class="audit-action">' + UI.esc(label) + '</span>' +
+      '<span class="audit-time">' + UI.esc(UI.fmtDateTime(l.createdAt)) + '</span></div>' +
+      '<div class="audit-who">' + UI.esc(l.userName || '系統') +
+      (l.target ? ' · ' + UI.esc(String(l.target)) : '') + '</div>' +
+      (detail ? '<div class="audit-detail">' + UI.esc(detail) + '</div>' : '') +
+      '</div>';
+  }
+  async function loadAudit() {
+    const box = $('audit-body');
+    box.innerHTML = UI.loadingHtml();
+    let logs = [];
+    try {
+      const data = await API.getAudit(chatId);
+      logs = (data && data.logs) || [];
+    } catch (e) {
+      box.innerHTML = UI.errorHtml('變更紀錄載入失敗:' + e.message);
+      return;
+    }
+    box.innerHTML = logs.length === 0 ? UI.emptyHtml('尚無變更紀錄') : logs.map(renderAuditRow).join('');
+  }
+  function refreshAuditIfOpen() {
+    if (!$('audit-body').hidden) loadAudit();
+  }
+  (function wireAudit() {
+    const head = $('audit-head');
+    function toggle() {
+      const body = $('audit-body');
+      const willOpen = body.hidden;
+      body.hidden = !willOpen;
+      head.setAttribute('aria-expanded', String(willOpen));
+      $('audit-chev').textContent = willOpen ? '▾' : '▸';
+      if (willOpen) loadAudit();
+    }
+    head.addEventListener('click', toggle);
+    head.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+    });
+  })();
+
+  // ================= 啟動 =================
+  (async function init() {
+    $('page-state').innerHTML = UI.loadingHtml('載入客戶資料…');
+    teamScroll.innerHTML = UI.loadingHtml('載入內部討論…');
+    // 先 me(掛右上角使用者 chip);401 由 api.js 統一轉跳 login.html
+    if (!(await UI.initAuth())) {
+      $('page-state').innerHTML = UI.errorHtml('未登入或無法連線到後端服務');
+      return;
+    }
+    // 先載檔案(建立 hash→連結對照),再載訊息;其餘並行
+    await Promise.allSettled([
+      loadCustomer(), loadFiles(), loadNotes(), loadSummary(),
+      loadSyncStatus(), loadProgress(), pollTeamMessages(true)
+    ]);
+    $('page-state').innerHTML = '';
+    $('detail-grid').hidden = false;
+    await loadMessages(null);
+    // 由鈴鐺通知跳入(focus=team):捲到內部討論並閃爍
+    if (UI.qsParam('focus') === 'team') {
+      const panel = document.querySelector('.team-panel');
+      if (panel) {
+        panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        panel.classList.add('flash');
+        setTimeout(function () { panel.classList.remove('flash'); }, 2000);
+      }
+    }
+  })();
+})();
+</script>
+</body>
+</html>

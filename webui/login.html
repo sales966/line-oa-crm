@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>登入 — LINE OA 客戶進度中樞</title>
+<link rel="stylesheet" href="app.css">
+<style>
+  .login-plugin { margin-top: 18px; padding-top: 16px; border-top: 1px dashed #cbd5e1; }
+  .lp-head { font-size: 13px; font-weight: 700; color: #334155; margin-bottom: 8px; }
+  .login-plugin .btn.block { display: block; text-align: center; text-decoration: none; margin-bottom: 10px; }
+  .lp-field { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+  .lp-k { font-size: 12px; color: #64748b; width: 70px; flex-shrink: 0; }
+  .lp-v { flex: 1; min-width: 0; font-size: 11.5px; background: #f1f5f9; padding: 4px 8px; border-radius: 5px; overflow-x: auto; white-space: nowrap; color: #0f172a; }
+  .lp-copy { flex-shrink: 0; font-size: 11px; padding: 3px 9px; border: 1px solid #cbd5e1; border-radius: 5px; background: #fff; cursor: pointer; color: #334155; }
+  .lp-copy:hover { background: #f1f5f9; }
+  .lp-steps { display: block; margin-top: 8px; font-size: 11px; color: #94a3b8; line-height: 1.6; }
+</style>
+</head>
+<body class="login-page">
+
+<main class="card login-card">
+  <h1>LINE OA 客戶進度中樞</h1>
+  <p class="login-sub">請登入以繼續</p>
+  <form id="login-form" novalidate>
+    <label for="login-username">帳號</label>
+    <input id="login-username" type="text" autocomplete="username" autocapitalize="off" spellcheck="false">
+    <label for="login-password">密碼</label>
+    <input id="login-password" type="password" autocomplete="current-password">
+    <div class="login-err" id="login-err"></div>
+    <button type="submit" class="btn primary block" id="login-btn">登入</button>
+  </form>
+  <div class="login-plugin">
+    <div class="lp-head">同仁安裝同步插件</div>
+    <a class="btn block" href="/plugin.zip?v=1.2.0" download="清晨沙灘同步器-v1.2.0.zip">⬇ 下載插件 (v1.2.0)</a>
+    <div class="lp-field">
+      <span class="lp-k">後端網址</span>
+      <code id="lp-url" class="lp-v"></code>
+      <button type="button" class="lp-copy" data-copy="lp-url">複製</button>
+    </div>
+    <div class="lp-field">
+      <span class="lp-k">API Token</span>
+      <code id="lp-token" class="lp-v">載入中…</code>
+      <button type="button" class="lp-copy" data-copy="lp-token">複製</button>
+    </div>
+    <small class="lp-steps">安裝:解壓 → chrome://extensions 開啟「開發人員模式」→「載入未封裝項目」選 extension-sync 資料夾 → 點插件「開啟設定」填入上方網址與 Token → 儲存。</small>
+  </div>
+</main>
+
+<script src="api.js"></script>
+<script>
+'use strict';
+(function () {
+  const $ = (id) => document.getElementById(id);
+
+  // 後端網址 = 同仁當前連進來的網址(IP 變動也不怕);插件設定填這個
+  $('lp-url').textContent = location.origin;
+  // Token 從後端讀取(只存 .env,不硬編碼進原始碼);未設定則提示洽管理員
+  fetch('/api/extension-token').then(function (r) { return r.json(); }).then(function (d) {
+    $('lp-token').textContent = (d && d.token) ? d.token : '(後端尚未設定 EXTENSION_TOKEN,請洽管理員)';
+  }).catch(function () { $('lp-token').textContent = '(讀取失敗,請洽管理員)'; });
+  // 一鍵複製
+  document.querySelectorAll('.lp-copy').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      const el = $(btn.getAttribute('data-copy'));
+      const txt = el ? el.textContent : '';
+      const done = function () { const o = btn.textContent; btn.textContent = '已複製'; setTimeout(function () { btn.textContent = o; }, 1500); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt).then(done, done);
+      } else {
+        const r = document.createRange(); r.selectNode(el);
+        const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+        try { document.execCommand('copy'); } catch (e) {}
+        s.removeAllRanges(); done();
+      }
+    });
+  });
+
+  // ?next= 只允許站內路徑(單一 / 開頭),防開放式轉跳
+  function safeNext() {
+    const n = UI.qsParam('next') || '';
+    if (n.charAt(0) === '/' && n.charAt(1) !== '/' && n.charAt(1) !== '\\') return n;
+    return '/';
+  }
+
+  // 已持有效 session(例如手動打開登入頁)→ 直接進入
+  function probeMe() {
+    API.request('/api/auth/me', { method: 'GET', noAuthRedirect: true })
+      .then(function () { location.replace(safeNext()); })
+      .catch(function () { /* 未登入或後端未啟動,停留在登入頁 */ });
+  }
+  probeMe();
+
+  // 從 bfcache 還原(登入後按「返回鍵」回到登入頁)時重跑探測,已登入者自動進入
+  window.addEventListener('pageshow', function (e) {
+    if (e.persisted) probeMe();
+  });
+
+  $('login-form').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    const username = $('login-username').value.trim();
+    const password = $('login-password').value;
+    const errBox = $('login-err');
+    errBox.textContent = '';
+    if (!username || !password) {
+      errBox.textContent = '請輸入帳號與密碼';
+      (username ? $('login-password') : $('login-username')).focus();
+      return;
+    }
+    const btn = $('login-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> 登入中…';
+    try {
+      await API.login(username, password);
+      location.replace(safeNext());
+    } catch (err) {
+      // 契約:帳密錯一律 401,不區分帳號不存在/密碼錯;連錯 5 次鎖定 → 429 + 鎖定提示
+      errBox.textContent = err.status === 401 ? '帳號或密碼錯誤'
+        : err.status === 429 ? err.message
+        : ('登入失敗:' + err.message);
+      btn.disabled = false;
+      btn.textContent = '登入';
+      $('login-password').focus();
+      $('login-password').select();
+    }
+  });
+
+  $('login-username').focus();
+})();
+</script>
+</body>
+</html>

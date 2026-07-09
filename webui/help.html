@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>使用說明 — LINE OA 客戶進度中樞</title>
+<link rel="stylesheet" href="app.css">
+<style>
+  /* help.html 專用排版(不動 app.css,避免與他人衝突) */
+  .help-main { max-width: 900px; }
+  .help-card { padding: 22px 26px; margin-bottom: 18px; }
+  .help-card h2 {
+    font-size: 17px;
+    font-weight: 800;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .help-card h3 { font-size: 14.5px; font-weight: 700; margin: 16px 0 6px; }
+  .help-card p { margin: 8px 0; color: var(--text); }
+  .help-card ul, .help-card ol { padding-left: 22px; margin: 8px 0; }
+  .help-card li { margin: 5px 0; }
+  .help-lead { color: var(--text-soft); font-size: 13px; }
+  .help-card code, .help-inline-code {
+    background: #f3f4f6;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 1px 6px;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 12.5px;
+    color: #b91c1c;
+    word-break: break-all;
+  }
+  /* 步驟清單:數字圓圈 */
+  .help-steps { list-style: none; padding-left: 0; counter-reset: hstep; }
+  .help-steps > li {
+    position: relative;
+    padding: 4px 0 12px 42px;
+    counter-increment: hstep;
+  }
+  .help-steps > li::before {
+    content: counter(hstep);
+    position: absolute;
+    left: 0; top: 2px;
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: #fff;
+    font-weight: 800;
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .help-steps > li strong { display: block; margin-bottom: 2px; }
+  /* 五階段表 */
+  .stage-flow { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
+  .stage-flow-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #fafbfc;
+  }
+  .stage-flow-item .sf-badge { flex: none; margin-top: 1px; }
+  .stage-flow-item .sf-body { min-width: 0; }
+  .stage-flow-item .sf-name { font-weight: 700; font-size: 14px; }
+  .stage-flow-item .sf-desc { color: var(--text-soft); font-size: 13px; margin-top: 2px; }
+  .stage-flow-arrow { text-align: center; color: var(--text-faint); font-size: 12px; line-height: 1; }
+  /* 功能小格 */
+  .feat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; margin: 12px 0; }
+  .feat-item {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    background: var(--card);
+  }
+  .feat-item .fi-title { font-weight: 700; font-size: 13.5px; margin-bottom: 4px; }
+  .feat-item .fi-desc { color: var(--text-soft); font-size: 12.5px; }
+  /* 常見問題 */
+  .faq-item { border-top: 1px solid var(--border); padding: 12px 0; }
+  .faq-item:first-of-type { border-top: none; }
+  .faq-q { font-weight: 700; font-size: 13.5px; display: flex; align-items: baseline; gap: 6px; }
+  .faq-q .qmark { color: var(--red); font-weight: 800; }
+  .faq-a { color: var(--text-soft); font-size: 13px; margin-top: 4px; padding-left: 18px; }
+  .help-note {
+    background: #fff7e6;
+    border: 1px solid #f5e2b8;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 12.5px;
+    color: #92600a;
+    margin: 10px 0;
+  }
+  .help-toc { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+  .help-toc a {
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--card);
+    color: var(--text);
+  }
+  .help-toc a:hover { background: var(--primary-soft); border-color: var(--primary); text-decoration: none; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="back" href="index.html">← 返回客戶列表</a>
+  <h1>使用說明</h1>
+  <span class="sub">LINE OA 客戶進度中樞</span>
+</header>
+
+<main class="page help-main">
+  <div id="page-state"></div>
+
+  <div id="help-content" hidden>
+
+    <section class="card help-card">
+      <h2>📖 這是什麼系統</h2>
+      <p class="help-lead">
+        本系統把散落在 LINE 官方帳號(chat.line.biz)的客戶對話,自動同步進一個共用後台,
+        讓跟單、設計、客服、管理各角色在同一個地方掌握每位客戶的進度、對話、檔案與內部討論。
+      </p>
+      <ul>
+        <li><strong>對話自動同步</strong>:同仁在 LINE 與客戶的對話,由瀏覽器插件自動搬進後台,不必手動複製。</li>
+        <li><strong>AI 總結</strong>:系統自動整理每位客戶的重點(產品、數量、規格、預算)與後續待辦,並可人工修改與批注。</li>
+        <li><strong>進度紅綠燈</strong>:五個階段的任務清單一目了然,知道案子走到哪、還缺什麼。</li>
+        <li><strong>檔案牆</strong>:客戶在 LINE 傳的檔案與同仁上傳的檔案集中收納,可預覽、下載。</li>
+        <li><strong>內部討論</strong>:團隊在客戶頁內部留言、@ 提及同事或檔案,客戶完全看不到。</li>
+      </ul>
+      <div class="help-toc">
+        <a href="#sec-sync">➕ 加入客戶同步</a>
+        <a href="#sec-backend">🖥 後台怎麼用</a>
+        <a href="#sec-stages">📊 五階段含義</a>
+        <a href="#sec-faq">❓ 常見問題</a>
+      </div>
+    </section>
+
+    <section class="card help-card" id="sec-sync">
+      <h2>➕ 同仁如何用插件加客戶同步</h2>
+      <p class="help-lead">
+        後台的資料來自一個獨立的 Chrome 瀏覽器插件(與公司報價助手互不影響)。
+        每位需要同步客戶的同仁,在自己的電腦裝一次即可。
+      </p>
+      <ol class="help-steps">
+        <li>
+          <strong>安裝插件</strong>
+          用 Chrome 開啟「擴充功能 → 管理擴充功能」,開啟右上角「開發人員模式」,
+          點「載入未封裝項目」,選擇 IT 提供的 <span class="help-inline-code">extension-sync</span> 資料夾(或解壓提供的 zip)。
+        </li>
+        <li>
+          <strong>填後端網址與 Token</strong>
+          在插件的「選項(Options)」頁,填入後端網址(公司內網,預設 <span class="help-inline-code">http://localhost:4680</span>)
+          與 IT 給的同步 <span class="help-inline-code">Token</span>。Token 用來驗證身分,請勿外流。
+        </li>
+        <li>
+          <strong>在 chat.line.biz 加入同步</strong>
+          用瀏覽器登入 <span class="help-inline-code">chat.line.biz</span>,打開要追蹤的客戶聊天室,
+          點插件視窗(popup)的「➕ 將此客戶加入同步」,或聊天室頁面左下角的「⟳ 同步」小按鈕。
+          加入後,系統會在每天 10:00–22:00 每小時自動增量同步,有新訊息時也會即時抓取。
+        </li>
+        <li>
+          <strong>需要完整歷史時按「建檔」</strong>
+          後台客戶列表或詳情頁有「🔄 建檔」按鈕,按下後插件會把該客戶的完整歷史對話翻到底並下載所有檔案,
+          完成後自動產生 AI 總結。狀態徽章會顯示「未建檔 / 建檔中 / 已建檔 / 失敗」。
+        </li>
+      </ol>
+      <div class="help-note">
+        ⚠️ 插件只會同步你「主動挑選」的客戶(白名單),不會掃描整個聊天列表;
+        資料只送到公司後端,不會傳給任何第三方。
+      </div>
+    </section>
+
+    <section class="card help-card" id="sec-backend">
+      <h2>🖥 後台怎麼用</h2>
+      <p class="help-lead">
+        從「客戶列表」點任一客戶進入「客戶詳情」頁,詳情頁集中了以下功能:
+      </p>
+      <div class="feat-grid">
+        <div class="feat-item">
+          <div class="fi-title">🤖 AI 總結(可編輯・批注)</div>
+          <div class="fi-desc">系統自動整理對話重點與後續待辦。可直接「修改」總結內容(會標記「已由 XXX 修改」並可還原),或加「批注」補充說明而不改原文。按「重新生成總結」會依最新對話重算。</div>
+        </div>
+        <div class="feat-item">
+          <div class="fi-title">📊 進度五階段紅綠燈</div>
+          <div class="fi-desc">橫向步驟條顯示目前階段;展開每個階段可看到任務清單,🟢 已完成 / 🔴 未完成。點燈可手動切換(切換後標「手動」),系統的 AI 判定不會覆蓋手動設定。已回簽/已打樣可填天數、已出廠可填物流單號。</div>
+        </div>
+        <div class="feat-item">
+          <div class="fi-title">💬 對話時間軸</div>
+          <div class="fi-desc">1:1 還原 LINE 對話:客戶訊息靠左灰底、我方靠右綠底,圖片內嵌縮圖、貼圖、檔案卡片、日期分隔一應俱全。可往上捲載入更早的訊息。</div>
+        </div>
+        <div class="feat-item">
+          <div class="fi-title">🗂 檔案牆(可上傳)</div>
+          <div class="fi-desc">客戶在 LINE 傳的檔案與同仁上傳的檔案集中一處,可依「圖片 / PDF / 設計檔 / 文件 / 其他」分類篩選。圖片點開全屏預覽、PDF 開新分頁檢視。按「⬆ 上傳檔案」可自行上傳。</div>
+        </div>
+        <div class="feat-item">
+          <div class="fi-title">💬 內部討論 + @ 提及</div>
+          <div class="fi-desc">團隊在客戶頁內部留言討論,客戶看不到;AI 會把這裡的內容當成背景記憶納入總結。輸入 @ 可提及同事(對方會收到鈴鐺通知)或檔案。也可在討論框用 📎 直接上傳檔案並分享。</div>
+        </div>
+        <div class="feat-item">
+          <div class="fi-title">🔔 通知鈴鐺</div>
+          <div class="fi-desc">右上角鈴鐺顯示你被 @ 提及的未讀數,點開可看清單,點項目直接跳到該客戶的討論區並標記已讀。</div>
+        </div>
+        <div class="feat-item">
+          <div class="fi-title">📜 變更紀錄</div>
+          <div class="fi-desc">所有關鍵操作(階段點燈、總結編輯/批注、檔案上傳等)都會留下「誰、何時、做了什麼」的紀錄,可展開查閱。</div>
+        </div>
+        <div class="feat-item">
+          <div class="fi-title">👤 帳號與權限</div>
+          <div class="fi-desc">右上角可修改密碼。「管理」角色多一個「使用者管理」入口,可新增/停用帳號、重設密碼。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card help-card" id="sec-stages">
+      <h2>📊 進度五階段含義</h2>
+      <p class="help-lead">案件固定依下列五個階段推進(流失為旁支狀態):</p>
+      <div class="stage-flow">
+        <div class="stage-flow-item">
+          <span class="sf-badge badge stage stage-talk">洽談</span>
+          <div class="sf-body">
+            <div class="sf-name">洽談</div>
+            <div class="sf-desc">初步接觸:了解需求(盒型/尺寸/數量)、取得聯絡資訊、了解預算、出報價單。</div>
+          </div>
+        </div>
+        <div class="stage-flow-arrow">▼</div>
+        <div class="stage-flow-item">
+          <span class="sf-badge badge stage stage-quoted">已回簽</span>
+          <div class="sf-body">
+            <div class="sf-name">已回簽 = 案件成立</div>
+            <div class="sf-desc">客戶回簽報價單,案件正式成立。收打樣訂金、安排打樣、寄出樣品、客戶確認樣品。可設定「打樣天數」估算完成日。</div>
+          </div>
+        </div>
+        <div class="stage-flow-arrow">▼</div>
+        <div class="stage-flow-item">
+          <span class="sf-badge badge stage stage-sample">已打樣</span>
+          <div class="sf-body">
+            <div class="sf-name">已打樣 = 確定生產</div>
+            <div class="sf-desc">客戶確認樣品後決定量產。收生產訂金/確認下單、安排大貨製作、確認交期。可設定「生產天數」估算完成日。</div>
+          </div>
+        </div>
+        <div class="stage-flow-arrow">▼</div>
+        <div class="stage-flow-item">
+          <span class="sf-badge badge stage stage-prod">已出廠</span>
+          <div class="sf-body">
+            <div class="sf-name">已出廠 = 物流</div>
+            <div class="sf-desc">貨已出廠,進入物流階段。安排物流、填國際物流資料(物流商/單號/報關)、通知客戶出貨。</div>
+          </div>
+        </div>
+        <div class="stage-flow-arrow">▼</div>
+        <div class="stage-flow-item">
+          <span class="sf-badge badge stage stage-delivered">已交付</span>
+          <div class="sf-body">
+            <div class="sf-name">已交付</div>
+            <div class="sf-desc">客戶簽收、尾款結清、結案。</div>
+          </div>
+        </div>
+      </div>
+      <div class="help-note">
+        💡 系統會依對話內容用 AI 自動判斷目前階段,但你隨時可手動點燈調整或「鎖定」階段;
+        手動設定優先,AI 不會覆蓋。
+      </div>
+    </section>
+
+    <section class="card help-card" id="sec-faq">
+      <h2>❓ 常見問題排除</h2>
+
+      <div class="faq-item">
+        <div class="faq-q"><span class="qmark">Q</span>正在同步時可以操作嗎?會不會出錯?</div>
+        <div class="faq-a">
+          同步進行中(尤其是「建檔」翻歷史時)請不要重複按同步或關掉 chat.line.biz 分頁。
+          系統有防重疊機制,重複觸發會顯示「同步進行中」;耐心等徽章變成「已建檔」即可。
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q"><span class="qmark">Q</span>插件顯示 Token 錯誤 / 一直同步失敗?</div>
+        <div class="faq-a">
+          到插件「選項」頁確認後端網址與 Token 是否正確(Token 由 IT 提供,不能有多餘空白)。
+          若近期更換過 Token,請重新填入並儲存。
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q"><span class="qmark">Q</span>提示「LINE 登入已失效」?</div>
+        <div class="faq-a">
+          代表 chat.line.biz 的登入過期了。請重新開啟 <span class="help-inline-code">chat.line.biz</span> 登入,
+          之後插件就能繼續同步。這與後台系統的帳號登入是兩回事。
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q"><span class="qmark">Q</span>後台打不開 / 顯示「無法連線到後端服務」?</div>
+        <div class="faq-a">
+          確認後端程式已啟動且連接埠為 <span class="help-inline-code">4680</span>,並確認你的電腦與後端在同一個內網。
+          若仍不行,請聯繫 IT 或用下方「問題回報」提交。
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q"><span class="qmark">Q</span>被登出了,或按返回鍵跳到登入頁?</div>
+        <div class="faq-a">
+          登入 session 有效期為 7 天,過期需重新登入。重新登入後系統會帶你回原本的頁面。
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q"><span class="qmark">Q</span>發現系統的問題想回報?</div>
+        <div class="faq-a">
+          點右上角使用者選單的「🐞 問題回報」,填標題與說明送出。在客戶頁回報會自動關聯該客戶,方便管理員排查。
+        </div>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<script src="api.js"></script>
+<script>
+'use strict';
+(function () {
+  const $ = (id) => document.getElementById(id);
+
+  (async function init() {
+    $('page-state').innerHTML = UI.loadingHtml('載入中…');
+    const me = await UI.initAuth();
+    if (!me) {
+      $('page-state').innerHTML = UI.errorHtml('未登入或無法連線到後端服務');
+      return;
+    }
+    $('page-state').innerHTML = '';
+    $('help-content').hidden = false;
+  })();
+})();
+</script>
+</body>
+</html>
