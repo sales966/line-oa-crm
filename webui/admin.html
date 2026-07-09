@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>系統健康 + AI 用量 — LINE OA 客戶進度中樞</title>
+<link rel="stylesheet" href="app.css">
+<style>
+  /* admin.html 專屬(不動 app.css):健康磁磚 + 純 CSS 用量長條 */
+  .health-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px;
+    padding: 14px 16px;
+  }
+  .h-tile {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    background: var(--bg);
+  }
+  .h-tile .h-label { font-size: 12px; color: var(--text-soft); margin-bottom: 6px; }
+  .h-tile .h-value { font-size: 18px; font-weight: 700; color: var(--text); word-break: break-word; }
+  .h-tile .h-sub { font-size: 12px; color: var(--text-faint); margin-top: 4px; }
+  .h-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  .h-dot.ok  { background: var(--green); }
+  .h-dot.bad { background: var(--red); }
+  .h-dot.warn{ background: #d97706; }
+
+  .tables-wrap { padding: 0 16px 14px; }
+  .tables-wrap .mini-tables {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 8px 16px;
+    font-size: 13px;
+  }
+  .mini-tables .row { display: flex; justify-content: space-between; border-bottom: 1px dashed var(--border); padding: 4px 0; }
+  .mini-tables .row .k { color: var(--text-soft); }
+  .mini-tables .row .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* 用量長條圖 */
+  .usage-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
+    padding: 14px 16px 0;
+  }
+  .chart-wrap { padding: 16px; }
+  .bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 140px;
+    padding-top: 6px;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+  }
+  .bar-col { flex: 1 1 0; min-width: 8px; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; }
+  .bar {
+    background: var(--primary);
+    border-radius: 3px 3px 0 0;
+    min-height: 2px;
+    transition: opacity .15s;
+  }
+  .bar-col:hover .bar { opacity: .75; }
+  .bar.zero { background: var(--border); }
+  .bar-axis {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--text-faint);
+    margin-top: 6px;
+  }
+
+  .err-list { padding: 4px 16px 14px; }
+  .err-list .err-row {
+    border: 1px solid #fde2e2;
+    background: #fef6f6;
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-top: 8px;
+    font-size: 12.5px;
+  }
+  .err-list .err-row .err-when { color: var(--text-soft); font-size: 11.5px; }
+  .err-list .err-row .err-msg { color: var(--red); margin-top: 2px; word-break: break-word; }
+
+  .recent-wrap { padding: 0 16px 14px; }
+  @media (prefers-color-scheme: dark) {
+    .err-list .err-row { background: rgba(220,38,38,.08); border-color: rgba(220,38,38,.3); }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="back" href="index.html">← 返回客戶列表</a>
+  <h1>系統健康 + AI 用量</h1>
+  <span class="sub">僅「管理」角色可使用</span>
+</header>
+
+<main class="page">
+  <div id="page-state"></div>
+
+  <!-- 上方:系統健康 -->
+  <section class="card" id="health-card" hidden>
+    <div class="card-head">
+      <span>系統健康</span>
+      <button type="button" class="btn small" id="refresh-btn">⟳ 重新整理</button>
+    </div>
+    <div id="health-state"></div>
+    <div class="health-grid" id="health-grid"></div>
+    <div class="tables-wrap" id="tables-wrap" hidden>
+      <div class="sub" style="margin-bottom:6px;">各資料表筆數</div>
+      <div class="mini-tables" id="mini-tables"></div>
+    </div>
+    <div class="err-list" id="err-list" hidden>
+      <div class="sub" style="margin:2px 0 2px;">最近錯誤</div>
+      <div id="err-rows"></div>
+    </div>
+  </section>
+
+  <!-- 下方:AI 用量 -->
+  <section class="card" id="usage-card" hidden>
+    <div class="card-head"><span>AI 用量(近 30 天)</span></div>
+    <div id="usage-state"></div>
+    <div class="usage-metrics" id="usage-metrics"></div>
+    <div class="chart-wrap" id="chart-wrap" hidden>
+      <div class="sub" style="margin-bottom:4px;">每日總結次數</div>
+      <div class="bars" id="bars"></div>
+      <div class="bar-axis" id="bar-axis"></div>
+    </div>
+    <div class="recent-wrap" id="recent-wrap" hidden>
+      <div class="sub" style="margin:8px 0 4px;">最近呼叫</div>
+      <div class="table-wrap">
+        <table class="list">
+          <thead>
+            <tr><th>時間</th><th>觸發</th><th>模型</th><th>耗時</th><th>結果</th></tr>
+          </thead>
+          <tbody id="recent-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="api.js"></script>
+<script>
+'use strict';
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const esc = UI.esc;
+
+  // ---- 防禦性讀取:後端形狀未定,容忍多種欄位命名 ----
+  function firstDefined() {
+    for (let i = 0; i < arguments.length; i++) {
+      if (arguments[i] !== undefined && arguments[i] !== null) return arguments[i];
+    }
+    return undefined;
+  }
+
+  /** epoch ms 或 'YYYY-MM-DD' 或 date 字串 → 顯示用短標籤(MM/DD) */
+  function shortDate(v) {
+    if (v === undefined || v === null || v === '') return '';
+    if (typeof v === 'number' || /^\d+$/.test(String(v))) {
+      const d = new Date(Number(v));
+      if (!isNaN(d.getTime())) return UI.pad2(d.getMonth() + 1) + '/' + UI.pad2(d.getDate());
+    }
+    const s = String(v);
+    const m = s.match(/(\d{1,2})[-/](\d{1,2})$/);
+    if (m) return UI.pad2(Number(m[1])) + '/' + UI.pad2(Number(m[2]));
+    return s.slice(-5);
+  }
+
+  /** 任意時間值 → 完整可讀(epoch ms 走 fmtDateTime,否則原樣) */
+  function fmtWhen(v) {
+    if (v === undefined || v === null || v === '') return '—';
+    if (typeof v === 'number' || /^\d{10,}$/.test(String(v))) return UI.fmtDateTime(Number(v));
+    return String(v);
+  }
+
+  function tile(label, valueHtml, subHtml) {
+    return '<div class="h-tile"><div class="h-label">' + esc(label) + '</div>' +
+      '<div class="h-value">' + (valueHtml || '—') + '</div>' +
+      (subHtml ? '<div class="h-sub">' + subHtml + '</div>' : '') + '</div>';
+  }
+
+  function dot(kind) { return '<span class="h-dot ' + kind + '"></span>'; }
+
+  // ---- LLM 狀態正規化(字串 'openai'/'disabled' 或物件) ----
+  function llmStatus(h) {
+    const v = h.llm;
+    if (v && typeof v === 'object') {
+      const ok = v.ok !== false && v.status !== 'disabled' && v.enabled !== false;
+      const label = v.model || v.status || v.provider || (ok ? '已啟用' : '未啟用');
+      return { ok: ok, label: String(label) };
+    }
+    const s = String(firstDefined(v, '') ).toLowerCase();
+    if (!s || s === 'disabled' || s === 'off' || s === 'none') return { ok: false, label: '未啟用' };
+    return { ok: true, label: String(v) };
+  }
+
+  // ---- 渲染健康卡 ----
+  function renderHealth(h) {
+    h = h || {};
+    const grid = $('health-grid');
+
+    // LLM
+    const llm = llmStatus(h);
+    let html = tile('LLM 服務', dot(llm.ok ? 'ok' : 'bad') + esc(llm.label));
+
+    // DB 大小
+    const dbObj = h.db || {};
+    const sizeBytes = firstDefined(dbObj.sizeBytes, dbObj.size, h.dbSizeBytes, h.dbSize);
+    html += tile('資料庫大小', esc(sizeBytes != null ? (UI.fmtSize(sizeBytes) || (sizeBytes + ' B')) : '—'));
+
+    // 最近同步
+    const lastSync = firstDefined(h.lastSyncAt, h.lastSync, h.syncAt, dbObj.lastSyncAt);
+    html += tile('最近同步時間', esc(lastSync != null ? UI.relTime(Number(lastSync) || lastSync) : '—'),
+      lastSync != null ? esc(fmtWhen(lastSync)) : '');
+
+    // 待建檔數
+    const pending = firstDefined(h.pendingBuild, h.pendingBuildCount, h.pending, h.pendingFullSync);
+    const pendingN = Number(pending);
+    html += tile('待建檔數',
+      (pending != null && isFinite(pendingN))
+        ? (dot(pendingN > 0 ? 'warn' : 'ok') + esc(String(pendingN)))
+        : '—');
+
+    // 備份狀態
+    const bk = h.backup || {};
+    const bkEnabled = firstDefined(bk.enabled, h.backupEnabled);
+    const bkLast = firstDefined(bk.lastBackupAt, bk.lastAt, h.lastBackupAt);
+    const bkOk = bkEnabled !== false && bkEnabled !== 0;
+    html += tile('備份狀態',
+      dot(bkEnabled === undefined ? 'warn' : (bkOk ? 'ok' : 'bad')) +
+        esc(bkEnabled === undefined ? '未知' : (bkOk ? '已啟用' : '未啟用')),
+      bkLast != null ? ('最近備份:' + esc(UI.relTime(Number(bkLast) || bkLast))) : '');
+
+    grid.innerHTML = html;
+
+    // 各表筆數
+    const tables = normalizeTables(firstDefined(h.tables, dbObj.tables, h.counts, dbObj.counts));
+    if (tables.length) {
+      $('mini-tables').innerHTML = tables.map(function (t) {
+        return '<div class="row"><span class="k">' + esc(t.name) + '</span>' +
+          '<span class="v">' + esc(formatCount(t.count)) + '</span></div>';
+      }).join('');
+      $('tables-wrap').hidden = false;
+    } else {
+      $('tables-wrap').hidden = true;
+    }
+
+    // 最近錯誤
+    const errors = firstDefined(h.recentErrors, h.errors, []) || [];
+    if (Array.isArray(errors) && errors.length) {
+      $('err-rows').innerHTML = errors.slice(0, 20).map(function (e) {
+        const when = firstDefined(e.createdAt, e.at, e.time, e.ts);
+        const msg = firstDefined(e.error, e.message, e.msg, typeof e === 'string' ? e : '') || '未知錯誤';
+        const ctx = firstDefined(e.trigger, e.source, e.context, '');
+        return '<div class="err-row">' +
+          '<div class="err-when">' + esc(fmtWhen(when)) + (ctx ? ' · ' + esc(String(ctx)) : '') + '</div>' +
+          '<div class="err-msg">' + esc(String(msg)) + '</div></div>';
+      }).join('');
+      $('err-list').hidden = false;
+    } else {
+      $('err-list').hidden = true;
+    }
+  }
+
+  /** tables 可能是 [{name,count}] 或 {name:count} → 統一為陣列 */
+  function normalizeTables(t) {
+    if (!t) return [];
+    if (Array.isArray(t)) {
+      return t.map(function (x) {
+        return { name: firstDefined(x.name, x.table, x.key, '?'), count: firstDefined(x.count, x.n, x.rows, x.value, 0) };
+      });
+    }
+    if (typeof t === 'object') {
+      return Object.keys(t).map(function (k) { return { name: k, count: t[k] }; });
+    }
+    return [];
+  }
+
+  function formatCount(n) {
+    const v = Number(n);
+    if (!isFinite(v)) return String(n == null ? '—' : n);
+    return v.toLocaleString('zh-Hant');
+  }
+
+  // ---- 渲染用量 ----
+  function renderUsage(s, recent) {
+    s = s || {};
+    const days = normalizeDays(firstDefined(s.days, s.daily, s.perDay, []));
+    const total = firstDefined(s.total, s.count, days.reduce(function (a, d) { return a + d.count; }, 0));
+    let avgMs = firstDefined(s.avgDurationMs, s.avgMs, s.avgDuration);
+    let rate = firstDefined(s.successRate, s.okRate, s.successRatio);
+
+    // successRate 可能是 0..1 或 0..100
+    let ratePct = null;
+    if (rate != null && isFinite(Number(rate))) {
+      rate = Number(rate);
+      ratePct = rate <= 1 ? rate * 100 : rate;
+    }
+
+    $('usage-metrics').innerHTML =
+      tile('近 30 天總次數', esc(total != null ? formatCount(total) : '—')) +
+      tile('平均耗時', esc(avgMs != null && isFinite(Number(avgMs)) ? (Math.round(Number(avgMs)) + ' ms') : '—')) +
+      tile('成功率', ratePct != null ? (dot(ratePct >= 95 ? 'ok' : (ratePct >= 80 ? 'warn' : 'bad')) + esc(ratePct.toFixed(1) + '%')) : '—');
+
+    // 長條圖
+    if (days.length) {
+      const max = days.reduce(function (m, d) { return Math.max(m, d.count); }, 0) || 1;
+      $('bars').innerHTML = days.map(function (d) {
+        const pct = Math.round((d.count / max) * 100);
+        const cls = d.count > 0 ? 'bar' : 'bar zero';
+        return '<div class="bar-col" title="' + esc(d.label + ':' + d.count + ' 次') + '">' +
+          '<div class="' + cls + '" style="height:' + (d.count > 0 ? Math.max(pct, 3) : 0) + '%"></div></div>';
+      }).join('');
+      const first = days[0].label, mid = days[Math.floor(days.length / 2)].label, last = days[days.length - 1].label;
+      $('bar-axis').innerHTML =
+        '<span>' + esc(first) + '</span><span>' + esc(mid) + '</span><span>' + esc(last) + '</span>';
+      $('chart-wrap').hidden = false;
+    } else {
+      $('chart-wrap').hidden = true;
+    }
+
+    // 最近呼叫
+    const items = firstDefined(recent && (recent.items || recent.recent || recent.rows), []) || [];
+    if (Array.isArray(items) && items.length) {
+      $('recent-tbody').innerHTML = items.slice(0, 20).map(function (it) {
+        const ok = it.ok === 1 || it.ok === true || it.ok === undefined && !it.error;
+        const dur = it.durationMs != null ? (Number(it.durationMs) + ' ms') : '—';
+        const result = ok
+          ? '<span class="badge status-on">成功</span>'
+          : '<span class="badge status-off" title="' + esc(String(it.error || '')) + '">失敗</span>';
+        return '<tr>' +
+          '<td>' + esc(UI.fmtDateTime(it.createdAt)) + '</td>' +
+          '<td>' + esc(firstDefined(it.trigger, '—')) + '</td>' +
+          '<td>' + esc(firstDefined(it.model, '—')) + '</td>' +
+          '<td>' + esc(dur) + '</td>' +
+          '<td>' + result + '</td>' +
+          '</tr>';
+      }).join('');
+      $('recent-wrap').hidden = false;
+    } else {
+      $('recent-wrap').hidden = true;
+    }
+  }
+
+  /** days 正規化為 [{label,count}] */
+  function normalizeDays(arr) {
+    if (!Array.isArray(arr)) return [];
+    return arr.map(function (d) {
+      const date = firstDefined(d.date, d.day, d.d, d.ts);
+      const count = Number(firstDefined(d.count, d.total, d.n, d.value, 0)) || 0;
+      return { label: shortDate(date), count: count };
+    });
+  }
+
+  // ---- 載入 ----
+  async function loadHealth() {
+    $('health-state').innerHTML = UI.loadingHtml('載入系統健康…');
+    try {
+      const h = await API.getAdminHealth();
+      $('health-state').innerHTML = '';
+      renderHealth(h || {});
+    } catch (e) {
+      $('health-grid').innerHTML = '';
+      $('tables-wrap').hidden = true;
+      $('err-list').hidden = true;
+      $('health-state').innerHTML = e.status === 403
+        ? UI.errorHtml('權限不足:僅「管理」角色可檢視系統健康')
+        : UI.errorHtml('系統健康載入失敗:' + e.message);
+    }
+  }
+
+  async function loadUsage() {
+    $('usage-state').innerHTML = UI.loadingHtml('載入 AI 用量…');
+    let summary = null, recent = null;
+    try {
+      summary = await API.getUsageSummary();
+    } catch (e) {
+      $('usage-metrics').innerHTML = '';
+      $('chart-wrap').hidden = true;
+      $('recent-wrap').hidden = true;
+      $('usage-state').innerHTML = e.status === 403
+        ? UI.errorHtml('權限不足:僅「管理」角色可檢視 AI 用量')
+        : UI.errorHtml('AI 用量載入失敗:' + e.message);
+      return;
+    }
+    try {
+      recent = await API.getUsageRecent(20);
+    } catch (e) {
+      recent = null; // 最近呼叫失敗不阻擋彙總顯示
+    }
+    $('usage-state').innerHTML = '';
+    renderUsage(summary || {}, recent);
+  }
+
+  function reloadAll() { loadHealth(); loadUsage(); }
+
+  $('refresh-btn').addEventListener('click', reloadAll);
+
+  // ---- 啟動:先 me(401 由 api.js 統一轉跳 login);非管理員顯示權限不足 ----
+  (async function init() {
+    $('page-state').innerHTML = UI.loadingHtml('載入中…');
+    const me = await UI.initAuth();
+    if (!me) {
+      $('page-state').innerHTML = UI.errorHtml('未登入或無法連線到後端服務');
+      return;
+    }
+    if (me.role !== '管理') {
+      $('page-state').innerHTML = UI.errorHtml('權限不足:僅「管理」角色可檢視系統健康與 AI 用量');
+      return;
+    }
+    $('page-state').innerHTML = '';
+    $('health-card').hidden = false;
+    $('usage-card').hidden = false;
+    reloadAll();
+  })();
+})();
+</script>
+</body>
+</html>

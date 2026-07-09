@@ -319,6 +319,7 @@
     const issuesHref = 'issues.html' + (chatId ? ('?chatId=' + encodeURIComponent(chatId)) : '');
     menu.innerHTML =
       (u && u.role === '管理' ? '<a class="user-menu-item" href="users.html">使用者管理</a>' : '') +
+      (u && u.role === '管理' ? '<a class="user-menu-item" href="admin.html">🩺 系統健康</a>' : '') +
       '<a class="user-menu-item" href="help.html">📖 使用說明</a>' +
       '<a class="user-menu-item" href="' + esc(issuesHref) + '">🐞 問題回報</a>' +
       '<button type="button" class="user-menu-item" data-act="qr">📱 手機版 QR</button>' +
@@ -432,12 +433,48 @@
     card.querySelector('#pw-old').focus();
   }
 
+  // ---------- 全域離線偵測橫幅(所有頁共用;initAuth 時掛載) ----------
+  // window 'offline'/'online' → 顯示/隱藏頂部橫幅;掛載時先依 navigator.onLine 初始化狀態。
+  // 輕量:單一 fixed 元素,樣式內聯(不動 app.css),冪等(重覆呼叫僅同步狀態)。
+
+  /** 顯示/隱藏離線橫幅(元素不存在時安全略過) */
+  function setOfflineBanner(show) {
+    const bar = document.getElementById('offline-banner');
+    if (!bar) return;
+    bar.hidden = !show;
+  }
+
+  /** 建立離線橫幅並掛 offline/online 監聽(冪等);已存在時僅重新同步當前狀態 */
+  function mountOfflineBanner() {
+    if (document.getElementById('offline-banner')) {
+      setOfflineBanner(!navigator.onLine);
+      return;
+    }
+    const bar = document.createElement('div');
+    bar.id = 'offline-banner';
+    bar.setAttribute('role', 'alert');
+    bar.setAttribute('aria-live', 'assertive');
+    bar.textContent = '⚠️ 網路中斷,操作暫停';
+    bar.style.cssText = [
+      'position:fixed', 'top:0', 'left:0', 'right:0', 'z-index:99999',
+      'background:#dc2626', 'color:#fff', 'text-align:center',
+      'font-size:14px', 'font-weight:600', 'letter-spacing:.5px',
+      'padding:8px 12px', 'box-shadow:0 1px 4px rgba(0,0,0,.25)'
+    ].join(';');
+    bar.hidden = true;
+    (document.body || document.documentElement).appendChild(bar);
+    window.addEventListener('offline', function () { setOfflineBanner(true); });
+    window.addEventListener('online', function () { setOfflineBanner(false); });
+    setOfflineBanner(!navigator.onLine); // 掛載當下若已離線,立即顯示
+  }
+
   /**
-   * 頁面啟動時呼叫:GET /api/auth/me 確認登入並掛右上角使用者 chip。
+   * 頁面啟動時呼叫:掛全域離線橫幅 + GET /api/auth/me 確認登入並掛右上角使用者 chip。
    * 回傳 user;未登入(401)回 null 且 request() 已轉跳 login.html;
    * 後端無法連線等其他錯誤也回 null(不轉跳,由頁面自行顯示錯誤)。
    */
   async function initAuth() {
+    mountOfflineBanner(); // 先掛橫幅:即使後端連不上(離線)也能提示使用者
     try {
       await fetchMe();
     } catch (e) {
@@ -640,6 +677,26 @@
   /** GET /audit → {logs:[{userName,action,target,detail,createdAt}]} 倒序 */
   function getAudit(chatId) {
     return get('/api/customers/' + encodeURIComponent(chatId) + '/audit');
+  }
+
+  // ---------- 系統健康 + AI 用量(僅管理;admin.html 用) ----------
+
+  /**
+   * GET /api/admin/health → 系統健康快照。
+   * 形狀由後端定,前端防禦性讀取常見欄位:
+   * {llm, db:{sizeBytes,tables:[{name,count}]}, lastSyncAt, pendingBuild,
+   *  backup:{enabled,lastBackupAt}, recentErrors:[{...}]}
+   */
+  function getAdminHealth() {
+    return get('/api/admin/health');
+  }
+  /** GET /api/usage/summary → 近 30 天 AI 用量彙總 {days:[{date,count}], avgDurationMs, successRate, total} */
+  function getUsageSummary() {
+    return get('/api/usage/summary');
+  }
+  /** GET /api/usage/recent?limit= → {items:[{id,lineChatId,orderId,model,durationMs,ok,error,trigger,createdAt}]} */
+  function getUsageRecent(limit) {
+    return get('/api/usage/recent' + (limit ? ('?limit=' + encodeURIComponent(limit)) : ''));
   }
 
   // ---------- 通知鈴鐺(index / customer / users 頂欄,掛在使用者 chip 旁) ----------
@@ -871,7 +928,8 @@
     uploadFile: uploadFile,
     suggestMentions: suggestMentions, getMyMentions: getMyMentions, readMentions: readMentions,
     editSummary: editSummary, getAnnotations: getAnnotations, addAnnotation: addAnnotation,
-    getAudit: getAudit
+    getAudit: getAudit,
+    getAdminHealth: getAdminHealth, getUsageSummary: getUsageSummary, getUsageRecent: getUsageRecent
   };
   global.UI = {
     esc: esc, relTime: relTime, fmtDate: fmtDate, fmtDateTime: fmtDateTime, pad2: pad2,

@@ -297,6 +297,22 @@ CREATE TABLE IF NOT EXISTS order_stage_meta (
 `);
 // summaries 加 orderId(0=整體;>0=某订单),additive 迁移
 tryAlter('ALTER TABLE summaries ADD COLUMN orderId INTEGER DEFAULT 0');
+
+// LLM 用量追踪:每次总结呼叫记一笔,供管理员看成本/耗时/成功率
+db.exec(`
+CREATE TABLE IF NOT EXISTS llm_usage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  lineChatId TEXT,
+  orderId INTEGER DEFAULT 0,
+  model TEXT,
+  durationMs INTEGER,
+  ok INTEGER DEFAULT 1,
+  error TEXT,
+  trigger TEXT,
+  createdAt INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_llm_usage_created ON llm_usage (createdAt);
+`);
 // 订单归属改用稳定 userId(displayName 非 UNIQUE 且可改名,不可作授权凭据);
 // createdByName 仅供显示。旧行 createdByUserId 为 NULL(建立者未知),仅管理可删。
 tryAlter('ALTER TABLE orders ADD COLUMN createdByUserId INTEGER');

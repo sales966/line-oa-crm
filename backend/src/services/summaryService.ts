@@ -15,6 +15,7 @@ import {
 import { getOrder, type OrderRow } from './orderService.js';
 import { applyLlmFileRoles } from './docRoleService.js';
 import { recordAudit, type AuditActor } from './auditService.js';
+import { recordUsage, type UsageTrigger } from './usageService.js';
 import { SUMMARIZE_MAX_MESSAGES } from '../config.js';
 
 /** 由 stageTemplate 生成五阶段任务清單文字,附進 system prompt 讓 LLM 逐項判定 */
@@ -267,8 +268,9 @@ export type SummarizeResult =
 
 export async function summarizeChat(
   chatId: string,
-  opts: { force?: boolean; actor?: AuditActor; orderId?: number } = {}
+  opts: { force?: boolean; actor?: AuditActor; orderId?: number; trigger?: UsageTrigger } = {}
 ): Promise<SummarizeResult> {
+  const trigger: UsageTrigger = opts.trigger === 'auto-build' ? 'auto-build' : 'manual';
   // orderId>0 走隔离的订单总结路径;orderId=0(或未带)= 整體,以下既有逻辑完全不变。
   const orderId = typeof opts.orderId === 'number' && opts.orderId > 0 ? Math.trunc(opts.orderId) : 0;
   if (orderId > 0) return summarizeOrder(chatId, orderId, opts);
@@ -295,7 +297,32 @@ export async function summarizeChat(
   const { prompt, coveredUntilTs, hasContent } = buildUserPrompt(chatId);
   if (!hasContent) return { ok: false, status: 400, error: '該聊天沒有可總結的內容' };
 
-  const output = await provider.summarize(SYSTEM_PROMPT, prompt);
+  // 计时包裹 LLM 呼叫:成功/失败都记一笔 llm_usage;失败仍照旧抛出,不改变总结主流程。
+  const model = `${provider.name}:${provider.model}`;
+  const startedAt = Date.now();
+  let output: Awaited<ReturnType<typeof provider.summarize>>;
+  try {
+    output = await provider.summarize(SYSTEM_PROMPT, prompt);
+  } catch (err) {
+    recordUsage({
+      lineChatId: chatId,
+      orderId: 0,
+      model,
+      durationMs: Date.now() - startedAt,
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      trigger,
+    });
+    throw err;
+  }
+  recordUsage({
+    lineChatId: chatId,
+    orderId: 0,
+    model,
+    durationMs: Date.now() - startedAt,
+    ok: true,
+    trigger,
+  });
 
   const now = Date.now();
   const res = insertSummaryStmt.run(
@@ -481,8 +508,9 @@ function buildOrderUserPrompt(
 async function summarizeOrder(
   chatId: string,
   orderId: number,
-  opts: { force?: boolean; actor?: AuditActor }
+  opts: { force?: boolean; actor?: AuditActor; trigger?: UsageTrigger }
 ): Promise<SummarizeResult> {
+  const trigger: UsageTrigger = opts.trigger === 'auto-build' ? 'auto-build' : 'manual';
   const provider = getProvider();
   if (!provider) return { ok: false, status: 503, error: 'LLM 未配置' };
 
@@ -507,7 +535,32 @@ async function summarizeOrder(
   const { prompt, coveredUntilTs, hasContent } = buildOrderUserPrompt(chatId, order, lo, hi);
   if (!hasContent) return { ok: false, status: 400, error: '該訂單日期範圍內沒有可總結的內容' };
 
-  const output = await provider.summarize(SYSTEM_PROMPT, prompt);
+  // 计时包裹 LLM 呼叫:成功/失败都记一笔 llm_usage(带 orderId);失败仍照旧抛出。
+  const model = `${provider.name}:${provider.model}`;
+  const startedAt = Date.now();
+  let output: Awaited<ReturnType<typeof provider.summarize>>;
+  try {
+    output = await provider.summarize(SYSTEM_PROMPT, prompt);
+  } catch (err) {
+    recordUsage({
+      lineChatId: chatId,
+      orderId,
+      model,
+      durationMs: Date.now() - startedAt,
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      trigger,
+    });
+    throw err;
+  }
+  recordUsage({
+    lineChatId: chatId,
+    orderId,
+    model,
+    durationMs: Date.now() - startedAt,
+    ok: true,
+    trigger,
+  });
 
   const now = Date.now();
   const res = insertSummaryOrderStmt.run(

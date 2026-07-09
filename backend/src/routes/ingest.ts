@@ -87,7 +87,7 @@ export default async function ingestRoutes(app: FastifyInstance): Promise<void> 
       // 取不到锁 = 已有总结在跑,跳过本次自动总结(该次总结已覆盖最新历史)。
       if (acquireSummarize(chatId)) {
         setImmediate(() => {
-          summarizeChat(chatId, { force: true, actor: { userId: null, userName: '系統(建檔)' } })
+          summarizeChat(chatId, { force: true, actor: { userId: null, userName: '系統(建檔)' }, trigger: 'auto-build' })
             .then((r) => {
               if (!r.ok) log.warn({ chatId, error: r.error }, '建檔後自動總結未執行');
             })
