@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>阿里雲部署說明 — LINE OA 客戶進度中樞</title>
+<link rel="stylesheet" href="app.css">
+<style>
+  .deploy-wrap { max-width: 860px; margin: 0 auto; padding: 20px 24px 60px; }
+  .deploy-wrap h2 { font-size: 18px; margin: 26px 0 10px; padding-bottom: 6px; border-bottom: 2px solid var(--primary); }
+  .deploy-wrap h3 { font-size: 15px; margin: 18px 0 8px; color: var(--primary); }
+  .deploy-wrap p, .deploy-wrap li { font-size: 13.5px; line-height: 1.7; }
+  .deploy-wrap ul, .deploy-wrap ol { padding-left: 22px; margin: 6px 0; }
+  .deploy-wrap table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 12.5px; }
+  .deploy-wrap th, .deploy-wrap td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+  .deploy-wrap th { background: #f8fafc; }
+  .callout { background: #fff7ed; border: 1px solid #fdba74; border-radius: 8px; padding: 12px 14px; margin: 12px 0; font-size: 13px; color: #9a3412; }
+  .callout.info { background: #eff6ff; border-color: #93c5fd; color: #1e40af; }
+  .code-block { position: relative; margin: 10px 0; }
+  .code-block pre { background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius: 8px; overflow-x: auto; font-size: 12.5px; line-height: 1.55; font-family: Consolas, "Courier New", monospace; white-space: pre; }
+  .code-block .copy-btn { position: absolute; top: 6px; right: 6px; font-size: 11px; padding: 3px 9px; border: 1px solid #334155; background: #1e293b; color: #cbd5e1; border-radius: 5px; cursor: pointer; }
+  .code-block .copy-btn:hover { background: #334155; }
+  .deploy-print { margin-left: auto; }
+  @media print { .topbar, .copy-btn, .deploy-print { display: none; } .code-block pre { background: #fff; color: #000; border: 1px solid #ccc; } }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="back" href="index.html">← 返回客戶列表</a>
+  <h1>☁️ 阿里雲部署說明</h1>
+  <span class="sub">僅「管理」角色可見</span>
+  <button type="button" class="btn small deploy-print" onclick="window.print()">🖨 列印 / 存 PDF</button>
+</header>
+
+<main class="deploy-wrap" id="deploy-body" hidden>
+
+  <p>把原本只在區域網路跑的「LINE OA 客戶進度中樞」搬上阿里雲，讓同仁在任何地方都能用網域 + HTTPS 安全登入。全程約 30–40 分鐘。</p>
+
+  <div class="callout">
+    <strong>⚠️ 核心安全原則（務必遵守）</strong>
+    <ol style="margin-top:6px;">
+      <li><strong>對外只開 80/443</strong>，4680 埠<strong>絕不</strong>對公網開放（僅本機迴環 + 反代）。</li>
+      <li><code>.env</code> 必設 <strong>PUBLIC_MODE=1</strong> — 登入頁不再把插件 Token 印給訪客，需登入後於後台取得。</li>
+      <li><code>.env</code>（含金鑰）、<code>data/</code>、<code>storage/</code>（客戶資料）<strong>永遠不進 git</strong>，只在伺服器上存在。</li>
+    </ol>
+  </div>
+
+  <h2>0. 事前準備</h2>
+  <ul>
+    <li>一台阿里雲 <strong>ECS</strong>，作業系統選 <strong>Ubuntu 22.04 LTS</strong>（1 vCPU / 2GB 起步；檔案多建議 40GB+ 磁碟）。</li>
+    <li>一個<strong>網域</strong>，例如 <code>crm.example.com</code>。</li>
+    <li>本機現有資料：<code>backend/data/app.db</code> 與 <code>backend/storage/</code>。</li>
+    <li>你的 <strong>OpenAI API Key</strong> 與現用的 <strong>EXTENSION_TOKEN</strong>（見本機 <code>backend/.env</code>）。</li>
+  </ul>
+
+  <h2>1. 阿里雲安全組（只開 80 / 443 / 22）</h2>
+  <p>ECS 控制台 → 網路與安全 → 安全組 → 入方向，只保留：</p>
+  <table>
+    <tr><th>協定</th><th>埠</th><th>授權對象</th><th>用途</th></tr>
+    <tr><td>TCP</td><td>22</td><td>你的固定 IP（建議）</td><td>SSH 管理</td></tr>
+    <tr><td>TCP</td><td>80</td><td>0.0.0.0/0</td><td>HTTP（導向 HTTPS + 憑證）</td></tr>
+    <tr><td>TCP</td><td>443</td><td>0.0.0.0/0</td><td>HTTPS（同仁存取）</td></tr>
+  </table>
+  <p><strong>不要</strong>新增 4680 的規則。</p>
+
+  <h2>2. 網域解析（DNS）</h2>
+  <p>到網域 DNS 管理，新增一筆 A 記錄，指向你的 ECS 公網 IP：</p>
+  <div class="code-block"><pre>主機記錄:crm
+記錄類型:A
+記錄值:  &lt;你的 ECS 公網 IP&gt;
+TTL:     10 分鐘</pre></div>
+  <p>等 <code>ping crm.example.com</code> 回你的 ECS IP 即生效（憑證申請前 DNS 必須先指好）。</p>
+
+  <h2>3. SSH 登入並安裝 Docker</h2>
+  <div class="code-block"><pre>ssh root@&lt;你的 ECS 公網 IP&gt;
+
+# 安裝 Docker（官方一鍵腳本）
+curl -fsSL https://get.docker.com | sh
+
+# 啟用並開機自啟
+systemctl enable --now docker
+
+# 驗證
+docker --version
+docker compose version</pre></div>
+
+  <h2>4. 取得程式碼</h2>
+  <p>本公開庫<strong>只含程式碼</strong>，不含金鑰或客戶資料，可放心 clone：</p>
+  <div class="code-block"><pre>mkdir -p /opt &amp;&amp; cd /opt
+git clone &lt;你的公開庫 URL&gt; lineoa
+cd /opt/lineoa</pre></div>
+
+  <h2>5. 建立 .env（關鍵：PUBLIC_MODE=1）</h2>
+  <div class="code-block"><pre>cp backend/.env.example .env
+nano .env</pre></div>
+  <p>放在<strong>專案根目錄</strong>，至少要有：</p>
+  <div class="code-block"><pre># 公網加固 —— 務必設 1（登入頁不再顯示 Token）
+PUBLIC_MODE=1
+
+# 插件同步金鑰 —— 沿用本機同一串,否則現有插件會失聯
+EXTENSION_TOKEN=&lt;與本機相同的那一串&gt;
+
+# OpenAI 金鑰(留空則 AI 總結停用)
+OPENAI_API_KEY=sk-...
+
+LLM_MODEL=gpt-5.5
+PORT=4680
+
+# admin 初始密碼(僅 users 表為空時生效,登入後請立刻改)
+ADMIN_INITIAL_PASSWORD=&lt;自訂強密碼&gt;</pre></div>
+
+  <h2>6. 啟動後端容器</h2>
+  <div class="code-block"><pre>cd /opt/lineoa
+docker compose up -d --build
+
+# 檢查(看到 "backend listening on http://0.0.0.0:4680" 即成功)
+docker compose ps
+docker compose logs -f backend
+curl -s http://127.0.0.1:4680/api/health</pre></div>
+
+  <h2>7. 網域 + HTTPS（方案 A：Caddy，推薦最簡）</h2>
+  <p>Caddy 會<strong>自動</strong>申請並續期 Let's Encrypt 憑證。</p>
+  <h3>7-1 安裝 Caddy</h3>
+  <div class="code-block"><pre>apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+apt update &amp;&amp; apt install -y caddy</pre></div>
+  <h3>7-2 套用本專案附的 Caddyfile</h3>
+  <div class="code-block"><pre># 把 Caddyfile 內的 crm.example.com 改成你的網域
+nano /opt/lineoa/Caddyfile
+
+cp /opt/lineoa/Caddyfile /etc/caddy/Caddyfile
+mkdir -p /var/log/caddy
+systemctl reload caddy
+systemctl status caddy --no-pager</pre></div>
+  <p>打開 <code>https://crm.example.com</code> 應見登入頁 + 有效憑證鎖頭。完成。</p>
+
+  <h2>8. 遷移本機既有資料（對話 / 檔案）</h2>
+  <h3>8-1 本機：先停後端再打包</h3>
+  <p>先關掉本機 <code>start.bat</code>（讓 SQLite WAL 落盤），在本機專案根用 PowerShell：</p>
+  <div class="code-block"><pre>Compress-Archive -Path backend\data\app.db, backend\storage -DestinationPath lineoa-data.zip -Force</pre></div>
+  <h3>8-2 上傳到伺服器</h3>
+  <div class="code-block"><pre>scp lineoa-data.zip root@&lt;ECS 公網 IP&gt;:/opt/lineoa/</pre></div>
+  <h3>8-3 伺服器：停容器 → 解壓到 volume → 重起</h3>
+  <div class="code-block"><pre>cd /opt/lineoa
+docker compose down
+
+apt install -y unzip
+unzip -o lineoa-data.zip -d _restore
+mkdir -p data storage
+cp _restore/backend/data/app.db data/app.db
+cp -r _restore/backend/storage/* storage/
+rm -rf _restore lineoa-data.zip
+
+docker compose up -d
+docker compose logs -f backend</pre></div>
+  <div class="callout info">帳號沿用資料庫內既有帳號；<code>ADMIN_INITIAL_PASSWORD</code> 只在 users 表為空時種子建立，遷移既有庫後不會覆蓋現有密碼。</div>
+
+  <h2>9. 更新插件設定（改填 https 網域）</h2>
+  <ol>
+    <li>點插件圖示 →「開啟設定」。</li>
+    <li><strong>後端網址</strong>改為 <code>https://crm.example.com</code>。</li>
+    <li><strong>API Token</strong> 維持 <code>.env</code> 內同一串（未變則不用動）。</li>
+    <li>儲存 → 到 chat.line.biz 重新整理 → 手動「立即同步」驗證。</li>
+  </ol>
+  <div class="callout info">公網模式下登入頁不再顯示 Token（改顯示「請登入後於設定取得」）。同仁需要 Token 時由管理員從 <code>.env</code> 提供。</div>
+
+  <h2>10. 日常維運速查</h2>
+  <div class="code-block"><pre>cd /opt/lineoa
+
+# 狀態 / 日誌
+docker compose ps
+docker compose logs -f backend
+
+# 更新程式碼後重建
+git pull
+docker compose up -d --build
+
+# 停 / 起 / 重啟
+docker compose down
+docker compose up -d
+docker compose restart backend</pre></div>
+  <h3>每日自動備份（cron）</h3>
+  <div class="code-block"><pre>crontab -e
+# 加一行:每天 03:00 打包 data + storage,保留最近 14 天
+0 3 * * * mkdir -p /root/backups &amp;&amp; tar czf /root/backups/lineoa-$(date +\%F).tar.gz -C /opt/lineoa data storage &amp;&amp; find /root/backups -name 'lineoa-*.tar.gz' -mtime +14 -delete</pre></div>
+
+  <h2>疑難排解</h2>
+  <table>
+    <tr><th>症狀</th><th>檢查</th></tr>
+    <tr><td>網域打不開 / 憑證失敗</td><td>DNS A 記錄是否指向本機；安全組 80/443；systemctl status caddy</td></tr>
+    <tr><td>登入頁出現但 API 502</td><td>docker compose ps 後端是否 Up；curl 127.0.0.1:4680/api/health</td></tr>
+    <tr><td>插件同步 401</td><td>插件 Token 與 .env 的 EXTENSION_TOKEN 是否一致；網址是否已改 https</td></tr>
+    <tr><td>上傳大檔失敗</td><td>反代體積上限是否 300MB（Caddyfile / nginx client_max_body_size）</td></tr>
+    <tr><td>遷移後資料沒出現</td><td>app.db 是否放到 /opt/lineoa/data/app.db；是否 down 後才覆蓋再 up</td></tr>
+    <tr><td>AI 總結 503</td><td>.env 的 OPENAI_API_KEY 是否填了；是否 docker compose up -d 重載 env</td></tr>
+  </table>
+
+  <div class="callout info" style="margin-top:24px;">完整檔案版也在專案根 <code>deploy-aliyun.md</code>、<code>Dockerfile</code>、<code>docker-compose.yml</code>、<code>Caddyfile</code>。</div>
+
+</main>
+
+<script src="api.js"></script>
+<script>
+'use strict';
+(function () {
+  // 僅「管理」可看。initAuth() 回傳 user 物件(未登入為 null 且已轉跳 login);getUser 在 API 上
+  UI.initAuth().then(function (user) {
+    var u = user || (window.API && API.getUser && API.getUser());
+    if (!u) return; // 未登入,initAuth 已轉跳 login
+    var body = document.getElementById('deploy-body');
+    if (u.role !== '管理') {
+      body.hidden = false;
+      body.innerHTML = '<div class="state-box error" style="margin-top:40px;">權限不足:僅「管理」角色可查看部署說明</div>';
+      return;
+    }
+    body.hidden = false;
+    // 每個 code-block 加「複製」按鈕
+    document.querySelectorAll('.code-block').forEach(function (blk) {
+      var pre = blk.querySelector('pre');
+      if (!pre) return;
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'copy-btn';
+      btn.textContent = '複製';
+      btn.addEventListener('click', function () {
+        var txt = pre.textContent;
+        var done = function () { btn.textContent = '已複製'; setTimeout(function () { btn.textContent = '複製'; }, 1500); };
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done, done);
+        else { var r = document.createRange(); r.selectNode(pre); var s = window.getSelection(); s.removeAllRanges(); s.addRange(r); try { document.execCommand('copy'); } catch (e) {} s.removeAllRanges(); done(); }
+      });
+      blk.appendChild(btn);
+    });
+  }).catch(function () {});
+})();
+</script>
+</body>
+</html>

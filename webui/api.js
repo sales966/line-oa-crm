@@ -320,6 +320,7 @@
     menu.innerHTML =
       (u && u.role === '管理' ? '<a class="user-menu-item" href="users.html">使用者管理</a>' : '') +
       (u && u.role === '管理' ? '<a class="user-menu-item" href="admin.html">🩺 系統健康</a>' : '') +
+      (u && u.role === '管理' ? '<a class="user-menu-item" href="deploy.html">☁️ 阿里雲部署</a>' : '') +
       '<a class="user-menu-item" href="help.html">📖 使用說明</a>' +
       '<a class="user-menu-item" href="' + esc(issuesHref) + '">🐞 問題回報</a>' +
       '<button type="button" class="user-menu-item" data-act="qr">📱 手機版 QR</button>' +
