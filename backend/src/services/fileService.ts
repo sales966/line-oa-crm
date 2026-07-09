@@ -26,6 +26,8 @@ export interface FileRow {
   source?: string | null;
   uploaderUserId?: number | null;
   uploaderName?: string | null;
+  docRole?: string | null;
+  docRoleSource?: string | null;
 }
 
 /** 按 UTF-16 code unit 上限截断,但不切断代理对(emoji 等) */
@@ -191,7 +193,7 @@ export function getFileById(id: number): FileRow | null {
 const insertUploadFileStmt = db.prepare(`
   INSERT INTO files (lineChatId, lineMessageId, fileName, fileSize, contentHash, localPath, mimeType,
                      uploadedAt, downloadedAt, expiredAt, source, uploaderUserId, uploaderName)
-  VALUES (@lineChatId, NULL, @fileName, @fileSize, @contentHash, @localPath, @mimeType,
+  VALUES (@lineChatId, @lineMessageId, @fileName, @fileSize, @contentHash, @localPath, @mimeType,
           @uploadedAt, @uploadedAt, NULL, 'upload', @uploaderUserId, @uploaderName)
 `);
 
@@ -199,6 +201,8 @@ export interface SaveUploadInput {
   chatId: string;
   fileName?: string;
   mimeType?: string;
+  /** 缺档补件:关联到原缺档讯息的 lineMessageId(让档案墙占位卡消失);一般上传省略 */
+  lineMessageId?: string;
   /** 已流式落地的临时档路径(本函数负责 rename) */
   tmpPath: string;
   fileBytes: number;
@@ -221,6 +225,7 @@ export function saveUploadedFile(input: SaveUploadInput): { file: FileRow & { do
 
   const info = insertUploadFileStmt.run({
     lineChatId: input.chatId,
+    lineMessageId: typeof input.lineMessageId === 'string' && input.lineMessageId ? input.lineMessageId : null,
     fileName: typeof input.fileName === 'string' && input.fileName ? input.fileName : safeName,
     fileSize: input.fileBytes,
     contentHash,
@@ -280,4 +285,37 @@ export function listMissingFiles(opts: { limit?: number; chatId?: string }): Mis
     return listMissingFilesByChatStmt.all({ now, limit, chatId }) as MissingFileEntry[];
   }
   return listMissingFilesStmt.all({ now, limit }) as MissingFileEntry[];
+}
+
+// ---------- 缺档补件占位清单(档案墙:某档 messages 有 contentHash 但 files 无实体) ----------
+
+export interface MissingWallEntry {
+  lineMessageId: string | null;
+  fileName: string | null;
+  fileSize: number | null;
+  docRole: string | null;
+  timestamp: number;
+  direction: string | null;
+}
+
+// 与 missing-files 兜底同一判定(contentHash 有、files 无实体、未过期),但回传档案墙占位卡所需字段。
+// 同 contentHash 去重(取最新一条讯息作代表),时间倒序。
+// 补件判定:除了 contentHash 有对应实体外,若已有 upload 档案以 lineMessageId 关联到该缺档讯息
+// (fu.id IS NULL 要求两侧皆无实体),亦视为已补件,占位卡消失。
+const listMissingWallStmt = db.prepare(`
+  SELECT m.lineMessageId, m.fileName, m.fileSize, m.docRole, MAX(m.timestamp) AS timestamp, m.direction
+  FROM messages m
+  LEFT JOIN files f ON f.contentHash = m.contentHash
+  LEFT JOIN files fu ON fu.lineMessageId = m.lineMessageId
+  WHERE m.contentHash IS NOT NULL AND f.id IS NULL AND fu.id IS NULL
+    AND (m.expiredAt IS NULL OR m.expiredAt > @now)
+    AND m.lineChatId = @chatId
+  GROUP BY m.contentHash
+  ORDER BY timestamp DESC
+`);
+
+/** 档案墙缺档补件占位:该 chat 引用了 contentHash 但无实体、未过期的档案清单。 */
+export function listMissingWall(chatId: string): MissingWallEntry[] {
+  const now = Date.now();
+  return listMissingWallStmt.all({ now, chatId }) as MissingWallEntry[];
 }

@@ -28,6 +28,8 @@ export default async function uploadsRoutes(app: FastifyInstance): Promise<void>
     let truncated = false;
     let fileName = '';
     let mimeType = '';
+    // 缺档补件:webui 带 lineMessageId 字段,关联到原缺档讯息以让占位卡消失
+    let lineMessageId = '';
     try {
       for await (const part of req.parts()) {
         if (part.type === 'file') {
@@ -45,8 +47,10 @@ export default async function uploadsRoutes(app: FastifyInstance): Promise<void>
           fileBytes = fs.statSync(p).size;
           fileName = typeof part.filename === 'string' ? part.filename : '';
           mimeType = typeof part.mimetype === 'string' ? part.mimetype : '';
+        } else if (part.type === 'field' && part.fieldname === 'lineMessageId') {
+          lineMessageId = typeof part.value === 'string' ? part.value.trim() : '';
         }
-        // 其余字段忽略(上传只需 file 二进制)
+        // 其余字段忽略
       }
 
       if (!tmpPath || fileBytes === 0) return reply.code(400).send({ error: '缺少 file 二进制内容' });
@@ -62,6 +66,7 @@ export default async function uploadsRoutes(app: FastifyInstance): Promise<void>
         mimeType,
         tmpPath,
         fileBytes,
+        lineMessageId: lineMessageId || undefined,
         uploader: { userId: user.id, userName: user.displayName },
       });
       tmpPath = null; // 已被 saveUploadedFile 的 rename 消费,勿在 finally 删

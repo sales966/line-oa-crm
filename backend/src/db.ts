@@ -252,6 +252,54 @@ tryAlter('ALTER TABLE summaries ADD COLUMN editedAt INTEGER');
 tryAlter('ALTER TABLE stage_meta ADD COLUMN deadlineAt INTEGER');
 tryAlter("ALTER TABLE stage_meta ADD COLUMN deadlineSource TEXT");
 tryAlter('ALTER TABLE stage_meta ADD COLUMN deadlineEvidence TEXT');
+// 文件角色分类(報價單/回簽單/設計圖/刀模/其他):LLM 依对话+档名判定,人工可改
+tryAlter('ALTER TABLE files ADD COLUMN docRole TEXT');
+tryAlter('ALTER TABLE files ADD COLUMN docRoleSource TEXT');
+tryAlter('ALTER TABLE messages ADD COLUMN docRole TEXT');
+
+// ── 订单(一客户多张订单,各自日期范围 + 各自总结 + 进度)──────────────────
+// 隔离式设计:订单进度用独立表(order_stage_tasks / order_stage_meta),
+// 完全不动现有 stage_tasks / stage_meta（整體視圖=orderId 0，行为不变，零回归）。
+db.exec(`
+CREATE TABLE IF NOT EXISTS orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  lineChatId TEXT NOT NULL,
+  title TEXT,
+  fromDate INTEGER,
+  toDate INTEGER,
+  createdByName TEXT,
+  createdAt INTEGER,
+  updatedAt INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_orders_chat ON orders (lineChatId, createdAt);
+
+CREATE TABLE IF NOT EXISTS order_stage_tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  orderId INTEGER NOT NULL,
+  stage TEXT NOT NULL,
+  taskKey TEXT NOT NULL,
+  done INTEGER DEFAULT 0,
+  source TEXT DEFAULT 'llm',
+  evidence TEXT,
+  updatedAt INTEGER,
+  UNIQUE (orderId, taskKey)
+);
+
+CREATE TABLE IF NOT EXISTS order_stage_meta (
+  orderId INTEGER PRIMARY KEY,
+  stageOverride TEXT,
+  sampleLeadDays INTEGER, sampleStartAt INTEGER,
+  productionLeadDays INTEGER, productionStartAt INTEGER,
+  logisticsProvider TEXT, logisticsTrackingNo TEXT, logisticsNote TEXT,
+  deadlineAt INTEGER, deadlineSource TEXT, deadlineEvidence TEXT,
+  updatedAt INTEGER
+);
+`);
+// summaries 加 orderId(0=整體;>0=某订单),additive 迁移
+tryAlter('ALTER TABLE summaries ADD COLUMN orderId INTEGER DEFAULT 0');
+// 订单归属改用稳定 userId(displayName 非 UNIQUE 且可改名,不可作授权凭据);
+// createdByName 仅供显示。旧行 createdByUserId 为 NULL(建立者未知),仅管理可删。
+tryAlter('ALTER TABLE orders ADD COLUMN createdByUserId INTEGER');
 
 // missing-files 兜底查询用的部分索引(messages 可能几十万行,只索引带 contentHash 的档案消息)
 db.exec(
@@ -268,6 +316,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_summaries_chat_created ON summaries (lineChatId, createdAt);
   CREATE INDEX IF NOT EXISTS idx_annotations_chat_summary ON summary_annotations (lineChatId, summaryId);
   CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions (expiresAt);
+  CREATE INDEX IF NOT EXISTS idx_notes_chat ON notes (lineChatId, createdAt);
+  CREATE INDEX IF NOT EXISTS idx_mentions_msg ON mentions (teamMessageId);
 `);
 
 // 规范化历史资料:早期 DEFAULT 为简体「洽谈」,权威阶段字面值是繁体「洽談」(stageTemplate.STAGE_ORDER[0])。

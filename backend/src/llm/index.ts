@@ -20,6 +20,17 @@ export interface TaskStatus {
   evidence?: string;
 }
 
+/** 文件角色枚举(缺档补件/档案分类;繁体字面值,勿改) */
+export const DOC_ROLES = ['報價單', '回簽單', '設計圖', '刀模', '其他'] as const;
+export type DocRole = (typeof DOC_ROLES)[number];
+
+/** LLM 对某个「档案讯息」的角色判定(以 lineMessageId 关联该讯息 → 对应档案) */
+export interface FileRole {
+  lineMessageId: string;
+  docRole: DocRole;
+  evidence?: string;
+}
+
 /** LLM 结构化输出(契约 JSON 形状) */
 export interface SummaryOutput {
   summaryText: string;
@@ -30,6 +41,8 @@ export interface SummaryOutput {
   taskStatus: TaskStatus[];
   /** 大貨死線(承諾客戶的交期):侦测到才有;date 建议 'YYYY-MM-DD' */
   deadline?: { date: string | null; evidence: string | null };
+  /** 每个档案讯息的角色判定(缺档补件 + 档案分类;以 lineMessageId 关联) */
+  fileRoles: FileRole[];
 }
 
 export interface LlmProvider {
@@ -57,6 +70,25 @@ export function normalizeStage(raw: unknown): Stage {
   if ((STAGES as readonly string[]).includes(s)) return s as Stage;
   if (STAGE_ALIASES[s]) return STAGE_ALIASES[s];
   return '洽談';
+}
+
+/** 旧枚举 / 简体变体 → 文件角色字面值 的归一化 */
+const DOC_ROLE_ALIASES: Record<string, DocRole> = {
+  报价单: '報價單',
+  回签单: '回簽單',
+  设计图: '設計圖',
+  设计稿: '設計圖',
+  設計稿: '設計圖',
+  刀模图: '刀模',
+  刀模圖: '刀模',
+};
+
+/** 把模型返回的角色字符串归一化为 DocRole;无法识别返回 null(不写入) */
+export function normalizeDocRole(raw: unknown): DocRole | null {
+  const s = String(raw ?? '').trim();
+  if ((DOC_ROLES as readonly string[]).includes(s)) return s as DocRole;
+  if (DOC_ROLE_ALIASES[s]) return DOC_ROLE_ALIASES[s];
+  return null;
 }
 
 /** 把模型返回的任意 JSON 归一化为 SummaryOutput(容错) */
@@ -106,6 +138,22 @@ export function normalizeSummaryOutput(raw: unknown): SummaryOutput {
     if (date) deadline = { date, evidence };
   }
 
+  // 文件角色:仅保留能解析出 lineMessageId 与合法 docRole 的项
+  const fileRolesRaw = Array.isArray(obj.fileRoles) ? obj.fileRoles : [];
+  const fileRoles: FileRole[] = fileRolesRaw
+    .map((r): FileRole | null => {
+      if (!r || typeof r !== 'object') return null;
+      const o = r as Record<string, unknown>;
+      const lineMessageId = String(o.lineMessageId ?? '').trim();
+      if (!lineMessageId) return null;
+      const docRole = normalizeDocRole(o.docRole);
+      if (!docRole) return null;
+      const ev = o.evidence;
+      const evidence = typeof ev === 'string' && ev.trim() ? ev.trim() : undefined;
+      return { lineMessageId, docRole, evidence };
+    })
+    .filter((r): r is FileRole => r !== null);
+
   return {
     summaryText: String(obj.summaryText ?? '').trim(),
     stageGuess: normalizeStage(obj.stageGuess),
@@ -118,6 +166,7 @@ export function normalizeSummaryOutput(raw: unknown): SummaryOutput {
     nextActions,
     taskStatus,
     deadline,
+    fileRoles,
   };
 }
 

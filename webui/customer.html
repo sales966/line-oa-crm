@@ -5,6 +5,69 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>客戶詳情 — LINE OA 客戶進度中樞</title>
 <link rel="stylesheet" href="app.css">
+<style>
+/* ===== 檔案牆分兩區(LINE 下載 / 工作台上傳)+ docRole 分類 + 缺檔補件 ===== */
+.file-region { margin-top: 6px; }
+.file-region + .file-region { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+.file-region-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.file-region-title { font-size: 13px; font-weight: 700; color: var(--text); }
+.file-region-count { display: inline-block; min-width: 18px; text-align: center; font-size: 11px; font-weight: 600; color: var(--text-soft); background: #f1f5f9; border-radius: 999px; padding: 0 6px; margin-left: 2px; }
+.file-region-empty { font-size: 12px; color: var(--text-faint); padding: 6px 2px 2px; }
+
+/* 每卡的來源列改為可換行,容納 docRole 徽章 */
+.file-src-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+
+/* docRole 徽章:報價單金色、回簽單綠色,其餘中性;可點者顯示手指游標 */
+.badge.docrole { font-size: 10px; padding: 1px 7px; font-weight: 700; }
+.badge.docrole.dr-quote  { background: #fdf1d6; color: #b45309; }
+.badge.docrole.dr-signed { background: var(--green-soft); color: #15803d; }
+.badge.docrole.dr-design { background: #f5f0ff; color: #7c3aed; }
+.badge.docrole.dr-knife  { background: #eef2f6; color: #475569; }
+.badge.docrole.dr-other  { background: #f3f4f6; color: #374151; }
+.badge.docrole.dr-add    { background: transparent; color: var(--text-faint); border: 1px dashed var(--border); font-weight: 600; }
+.fc-role-badge { cursor: pointer; }
+.fc-role-badge:hover { filter: brightness(0.96); }
+
+/* docRole 分類標籤(與檔案類型標籤同列,虛線邊框以區隔) */
+.file-tab.role-tab { border-style: dashed; }
+.file-tab.role-tab.active { border-style: solid; color: #fff; }
+.file-tab.role-tab.dr-quote.active  { background: #b45309; border-color: #b45309; }
+.file-tab.role-tab.dr-signed.active { background: #15803d; border-color: #15803d; }
+
+/* 缺檔補件占位卡 */
+.file-card.missing { border-style: dashed; background: #fcfcfd; cursor: default; }
+.file-card.missing:active { cursor: default; }
+.fc-missing-icon { opacity: .5; filter: grayscale(1); }
+.fc-missing-note { font-size: 11px; color: #b45309; font-weight: 600; }
+
+/* docRole 修改浮動選單 */
+.docrole-menu { position: fixed; z-index: 250; width: 172px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); padding: 6px; }
+.docrole-menu-title { font-size: 11px; color: var(--text-soft); padding: 2px 6px 6px; }
+.docrole-opt { display: flex; align-items: center; width: 100%; text-align: left; background: transparent; border: none; border-radius: 7px; padding: 6px; cursor: pointer; }
+.docrole-opt:hover { background: #f5f7fa; }
+.docrole-opt.sel { background: var(--primary-soft); }
+.docrole-opt.docrole-clear { font-size: 12px; color: var(--red); justify-content: center; margin-top: 2px; border-top: 1px solid var(--border); padding-top: 8px; }
+
+/* 訂單列:整體 + 各訂單標籤 + 新增訂單 */
+.order-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; padding: 10px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
+.order-bar-label { font-size: 12px; color: var(--text-soft); font-weight: 700; margin-right: 2px; }
+.order-tab { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px; background: transparent; cursor: pointer; font-size: 13px; color: var(--text); line-height: 1.3; }
+.order-tab:hover { background: #f5f7fa; }
+.order-tab.active { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); font-weight: 700; }
+.order-tab .order-tab-sub { font-size: 11px; color: var(--text-soft); }
+.order-tab.active .order-tab-sub { color: var(--primary); }
+.order-tab-actions { display: inline-flex; gap: 2px; margin-left: 2px; }
+.order-tab-mini { border: none; background: transparent; cursor: pointer; font-size: 11px; padding: 1px 3px; border-radius: 6px; opacity: .6; }
+.order-tab-mini:hover { opacity: 1; background: rgba(0,0,0,.06); }
+.order-add-btn { display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px; border: 1px dashed var(--border); border-radius: 999px; background: transparent; cursor: pointer; font-size: 13px; color: var(--text-soft); }
+.order-add-btn:hover { border-color: var(--primary); color: var(--primary); }
+.order-scope-hint { font-size: 12px; color: var(--primary); margin-left: auto; }
+.order-modal-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.order-modal-field label { font-size: 13px; color: var(--text-soft); }
+.order-modal-field input { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; }
+.order-modal-row { display: flex; gap: 10px; }
+.order-modal-row .order-modal-field { flex: 1; }
+</style>
 </head>
 <body>
 
@@ -21,6 +84,9 @@
 
 <main class="page">
   <div id="page-state"></div>
+
+  <!-- 訂單列:整體 + 各訂單標籤(切換總結/進度/時間軸的日期範圍)+ 新增訂單 -->
+  <div class="order-bar" id="order-bar" hidden></div>
 
   <!-- 進度面板:五階段步驟條 + 每階段任務紅綠燈 + 天數/物流參數 -->
   <section class="card progress-card" id="progress-card" hidden>
@@ -92,7 +158,6 @@
       <section class="card">
         <div class="card-head">
           <span>檔案牆 <span class="sub" id="file-count"></span></span>
-          <button class="btn small primary" id="file-upload-btn">⬆ 上傳檔案</button>
         </div>
         <input type="file" id="file-upload-input" hidden>
         <div class="upload-progress" id="upload-progress" hidden>
@@ -131,6 +196,13 @@
   let allMsgs = [];        // 已載入的全部訊息(時間正序);重繪時據此做「同一人連續訊息只顯示一次名字」的視覺分組
   let custName = '';       // 客戶名稱(in 訊息缺 senderName 時的名字後備)
   let custChatType = '';   // USER / GROUP / ROOM(群聊時成員名字加色點區分)
+
+  // 訂單:目前選中的 orderId(0=整體視圖,行為與上線版完全相同);>0=某訂單日期範圍切片
+  let currentOrderId = 0;
+  let ordersList = [];     // 訂單清單(倒序);由 loadOrders 載入
+  // 範圍載入序號:切換訂單 / 重載範圍面板時遞增,各 scoped 載入(進度/總結/對話)於套用結果前
+  // 比對捕獲時的序號,序號已變則捨棄——避免舊訂單的慢回應蓋掉新選訂單的畫面(比照 index.html reqSeq)
+  let orderReqSeq = 0;
 
   if (!chatId) {
     $('page-state').innerHTML = UI.errorHtml('缺少 chatId 參數,請從客戶列表進入');
@@ -200,6 +272,7 @@
   // ================= 中欄:對話時間軸 =================
   // API 回傳時間倒序;畫面由上到下為時間正序,「載入更早」在頂部往前補。
   async function loadMessages(before, beforeId) {
+    const seq = orderReqSeq; // 捕獲當下範圍序號;回應到達時序號已變(切換訂單)則捨棄
     const scroll = $('chat-scroll');
     const btn = $('load-more-btn');
     const firstLoad = !before;
@@ -209,15 +282,16 @@
 
     let msgs = [];
     try {
-      const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
-      if (before) {
-        params.set('before', String(before));
-        // 同時帶 beforeId → 後端走 (timestamp,id) 複合游標,避免頁邊界同毫秒訊息被跳過
-        if (beforeId != null) params.set('beforeId', String(beforeId));
-      }
-      const data = await API.get(api + '/messages?' + params.toString());
+      // orderId>0 → 帶 orderId(後端按 fromDate/toDate 過濾);0 → 現狀不帶。
+      // beforeId 併帶時後端走 (timestamp,id) 複合游標,避免頁邊界同毫秒訊息被跳過。
+      const data = await API.getMessagesFor(chatId, currentOrderId, {
+        limit: PAGE_SIZE,
+        before: before || undefined,
+        beforeId: (before && beforeId != null) ? beforeId : undefined
+      });
       msgs = (data && data.messages) || [];
     } catch (e) {
+      if (seq !== orderReqSeq) return; // 已切換訂單,捨棄過期結果
       if (firstLoad) {
         scroll.innerHTML = UI.errorHtml('對話載入失敗:' + e.message);
       } else {
@@ -226,6 +300,7 @@
       btn.disabled = false;
       return;
     }
+    if (seq !== orderReqSeq) return; // 已切換訂單,捨棄過期結果(勿蓋掉新訂單的 allMsgs/畫面)
     btn.disabled = false;
 
     if (firstLoad && msgs.length === 0) {
@@ -356,16 +431,19 @@
   let hasSummary = false; // 是否已存在總結(決定「重新生成總結」是否帶 force)
 
   async function loadSummary() {
+    const seq = orderReqSeq; // 捕獲當下範圍序號;回應到達時序號已變(切換訂單)則捨棄
     const box = $('summary-body');
     box.innerHTML = UI.loadingHtml();
     try {
-      const data = await API.get(api + '/summaries');
+      const data = await API.getSummariesFor(chatId, currentOrderId);
+      if (seq !== orderReqSeq) return; // 已切換訂單,捨棄過期結果
       const list = (data && data.summaries) || [];
       if (list.length === 0) { renderSummary(null); return; }
       // 保險起見依 createdAt 取最新
       list.sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
       renderSummary(list[0]);
     } catch (e) {
+      if (seq !== orderReqSeq) return; // 已切換訂單,捨棄過期錯誤
       box.innerHTML = UI.errorHtml('總結載入失敗:' + e.message);
     }
   }
@@ -576,7 +654,7 @@
       // 依契約緩存規則,coveredUntilTs >= 最新訊息 timestamp 時後端直接回 cached,
       // 不帶 force 等於點了沒點(尤其建檔回填更舊歷史後,舊總結會永久卡死)。
       // 「產生總結」(從無總結)維持不帶 force,讓緩存規則自然放行。
-      const data = await API.post('/api/summarize/' + encodeURIComponent(chatId) + (hasSummary ? '?force=1' : ''));
+      const data = await API.summarizeFor(chatId, currentOrderId, hasSummary);
       if (data && data.summary) {
         renderSummary(data.summary);
       } else {
@@ -597,11 +675,19 @@
     }
   });
 
-  // ================= 右欄:檔案庫(分類 + 縮圖 + 燈箱預覽) =================
-  let allFiles = [];       // 全部檔案(已排序)
-  let fileTab = 'all';     // 目前分類篩選
+  // ================= 右欄:檔案牆(兩區:LINE 下載 / 工作台上傳 · 分類 · docRole · 縮圖燈箱) =================
+  let allFiles = [];       // 全部實體檔案(已排序,含 _cat / docRole)
+  let missingFiles = [];   // 缺檔占位(messages 有 contentHash 但無實體;虛擬檔,含 _cat / _missing)
+  let fileTab = 'all';     // 目前篩選:'all' | 檔案類型 cat | 'role:'+docRole
   const CAT_LABEL = { all: '全部', image: '圖片', pdf: 'PDF', design: '設計檔', doc: '文件', other: '其他' };
   const CAT_ORDER = ['all', 'image', 'pdf', 'design', 'doc', 'other'];
+  // docRole 分類:只在有該類(實體或占位)時顯示標籤;報價單金色、回簽單綠色,其餘中性
+  const DOCROLE_ORDER = ['報價單', '回簽單', '設計圖', '刀模'];
+  const DOCROLE_CLASS = { '報價單': 'dr-quote', '回簽單': 'dr-signed', '設計圖': 'dr-design', '刀模': 'dr-knife', '其他': 'dr-other' };
+  const DOCROLE_CHOICES = ['報價單', '回簽單', '設計圖', '刀模', '其他']; // 徽章可手動改成的值(另含「清除」)
+
+  function isUpload(f) { return String(f.source || '').toLowerCase() === 'upload'; }
+  function normDocRole(r) { const s = String(r == null ? '' : r).trim(); return s; }
 
   // 依 mimeType + 副檔名分類
   function classifyFile(f) {
@@ -621,10 +707,11 @@
   async function loadFiles() {
     const box = $('files-body');
     box.innerHTML = UI.loadingHtml();
-    let files = [];
+    let files = [], missing = [];
     try {
       const data = await API.get(api + '/files');
       files = (data && data.files) || [];
+      missing = (data && data.missing) || []; // messages 有 contentHash 但無實體(LINE 已無法提供)
     } catch (e) {
       box.innerHTML = UI.errorHtml('檔案載入失敗:' + e.message);
       return;
@@ -637,35 +724,107 @@
     files.sort(function (a, b) {
       return (b.uploadedAt || b.downloadedAt || 0) - (a.uploadedAt || a.downloadedAt || 0);
     });
-    files.forEach(function (f) { f._cat = classifyFile(f); });
+    files.forEach(function (f) { f._cat = classifyFile(f); f.docRole = normDocRole(f.docRole); });
+    // 缺檔占位:視為 LINE 來源的虛擬檔——可依副檔名分類、依 docRole 歸類,但無實體、不可下載/拖曳
+    missingFiles = (missing || []).map(function (m) {
+      return {
+        _missing: true, source: 'line',
+        lineMessageId: m.lineMessageId,
+        fileName: m.fileName || '',
+        fileSize: m.fileSize,
+        docRole: normDocRole(m.docRole),
+        timestamp: m.timestamp,
+        direction: m.direction,
+        _cat: classifyFile({ fileName: m.fileName, mimeType: '' })
+      };
+    });
+    missingFiles.sort(function (a, b) { return (b.timestamp || 0) - (a.timestamp || 0); });
     allFiles = files;
     $('file-count').textContent = files.length ? '(' + files.length + ')' : '';
     renderFileLibrary();
   }
 
+  function unionFiles() { return allFiles.concat(missingFiles); }
+
+  // 目前篩選是否命中:'all' 全部;'role:X' 依 docRole;其餘依檔案類型 _cat
+  function matchesTab(f) {
+    if (fileTab === 'all') return true;
+    if (fileTab.indexOf('role:') === 0) return f.docRole === fileTab.slice(5);
+    return f._cat === fileTab;
+  }
+
   function renderFileLibrary() {
     const box = $('files-body');
-    if (allFiles.length === 0) { box.innerHTML = UI.emptyHtml('尚無檔案'); return; }
-    // 分類標籤(含數量)
-    const counts = { all: allFiles.length };
-    allFiles.forEach(function (f) { counts[f._cat] = (counts[f._cat] || 0) + 1; });
+    const union = unionFiles();
+    // ---- 分類標籤:檔案類型(cat)+ docRole(有該類才顯示),同列且作用於兩區 ----
+    const counts = { all: union.length };
+    union.forEach(function (f) { counts[f._cat] = (counts[f._cat] || 0) + 1; });
+    const roleCounts = {};
+    union.forEach(function (f) { if (f.docRole) roleCounts[f.docRole] = (roleCounts[f.docRole] || 0) + 1; });
+
     let tabs = '<div class="file-tabs">';
     CAT_ORDER.forEach(function (c) {
       if (c !== 'all' && !counts[c]) return;
       tabs += '<button type="button" class="file-tab' + (fileTab === c ? ' active' : '') +
         '" data-cat="' + c + '">' + CAT_LABEL[c] + ' ' + (counts[c] || 0) + '</button>';
     });
+    DOCROLE_ORDER.forEach(function (r) {
+      if (!roleCounts[r]) return;
+      const key = 'role:' + r;
+      tabs += '<button type="button" class="file-tab role-tab ' + (DOCROLE_CLASS[r] || '') +
+        (fileTab === key ? ' active' : '') + '" data-role="' + UI.esc(r) + '">' +
+        UI.esc(r) + ' ' + roleCounts[r] + '</button>';
+    });
     tabs += '</div>';
-    const list = fileTab === 'all' ? allFiles : allFiles.filter(function (f) { return f._cat === fileTab; });
-    const grid = '<div class="file-grid">' + list.map(renderFileCard).join('') + '</div>';
-    box.innerHTML = tabs + grid;
+
+    // 兩區一律顯示(即使全空):讓同事知道可上傳;各區自帶小字空狀態
+    // ---- 兩區:LINE 下載(source!='upload' + 缺檔占位)/ 工作台上傳(source='upload') ----
+    const lineItems = union.filter(function (f) { return !isUpload(f) && matchesTab(f); });
+    const uploadItems = allFiles.filter(function (f) { return isUpload(f) && matchesTab(f); });
+    const lineTotal = allFiles.filter(function (f) { return !isUpload(f); }).length + missingFiles.length;
+    const uploadTotal = allFiles.filter(isUpload).length;
+
+    let html = tabs;
+    html += renderRegion('📥 LINE 下載', lineTotal, lineItems, '');
+    html += renderRegion('🖥 工作台上傳', uploadTotal, uploadItems,
+      '<button type="button" class="btn small primary file-upload-trigger">⬆ 上傳檔案</button>');
+    box.innerHTML = html;
+  }
+
+  function renderRegion(title, total, items, headExtraHtml) {
+    let h = '<div class="file-region">';
+    h += '<div class="file-region-head"><span class="file-region-title">' + UI.esc(title) +
+      ' <span class="file-region-count">' + total + '</span></span>' + (headExtraHtml || '') + '</div>';
+    if (items.length === 0) {
+      h += '<div class="file-region-empty">' + (total === 0 ? '此區尚無檔案' : '此分類無檔案') + '</div>';
+    } else {
+      h += '<div class="file-grid">' + items.map(function (f) {
+        return f._missing ? renderMissingCard(f) : renderFileCard(f);
+      }).join('') + '</div>';
+    }
+    return h + '</div>';
+  }
+
+  // docRole 徽章:報價單金色、回簽單綠色;實體檔可點擊修改,占位卡僅顯示
+  function docRoleBadgeHtml(f) {
+    const editable = f.id != null && !f._missing;
+    if (f.docRole) {
+      const cls = DOCROLE_CLASS[f.docRole] || 'dr-other';
+      return '<span class="badge docrole ' + cls + (editable ? ' fc-role-badge' : '') + '"' +
+        (editable ? ' data-file-id="' + UI.esc(String(f.id)) + '" data-role="' + UI.esc(f.docRole) +
+          '" title="點擊修改文件分類"' : '') + '>' + UI.esc(f.docRole) + '</span>';
+    }
+    if (editable) {
+      return '<span class="badge docrole dr-add fc-role-badge" data-file-id="' + UI.esc(String(f.id)) +
+        '" data-role="" title="設定文件分類">＋ 分類</span>';
+    }
+    return '';
   }
 
   function renderFileCard(f) {
     const url = fileUrl(f);
     const sizeStr = UI.fmtSize(f.fileSize);
-    const isUpload = String(f.source || '').toLowerCase() === 'upload';
-    const srcBadge = isUpload
+    const srcBadge = isUpload(f)
       ? '<span class="badge file-src src-upload" title="同事上傳">內部上傳' + (f.uploaderName ? '·' + UI.esc(f.uploaderName) : '') + '</span>'
       : '<span class="badge file-src src-line" title="來自 LINE">LINE</span>';
     let preview, action;
@@ -684,20 +843,105 @@
     const displayName = f._cat === 'image' ? niceImgName(f.fileName) : (f.fileName || '(未命名)');
     return '<div class="file-card fc-' + f._cat + '" draggable="true" data-file-id="' + UI.esc(String(f.id != null ? f.id : '')) +
       '" data-file-name="' + UI.esc(displayName) + '">' +
-      '<div class="file-src-row">' + srcBadge + '</div>' +
+      '<div class="file-src-row">' + srcBadge + docRoleBadgeHtml(f) + '</div>' +
       preview +
       '<div class="fname" title="' + UI.esc(f.fileName || '') + '">' + UI.esc(displayName) + '</div>' +
       '<div class="fmeta">' + (sizeStr ? UI.esc(sizeStr) + ' · ' : '') + UI.esc(UI.fmtDate(f.uploadedAt || f.downloadedAt)) + '</div>' +
       action + '</div>';
   }
 
-  // 檔案庫互動:分類切換 + 圖片燈箱
+  // 缺檔補件占位卡:檔名 + docRole 徽章 + ⚠️ LINE 已無法提供 + ⬆ 上傳補件
+  function renderMissingCard(m) {
+    const sizeStr = UI.fmtSize(m.fileSize);
+    const icon = m._cat === 'pdf' ? '📕' : m._cat === 'image' ? '🖼' : m._cat === 'design' ? '🎨' : m._cat === 'doc' ? '📄' : '📎';
+    return '<div class="file-card missing fc-' + m._cat + '">' +
+      '<div class="file-src-row"><span class="badge file-src src-line" title="來自 LINE">LINE</span>' + docRoleBadgeHtml(m) + '</div>' +
+      '<div class="fc-icon fc-missing-icon">' + icon + '</div>' +
+      '<div class="fname" title="' + UI.esc(m.fileName || '') + '">' + UI.esc(m.fileName || '(未命名檔案)') + '</div>' +
+      '<div class="fmeta">' + (sizeStr ? UI.esc(sizeStr) + ' · ' : '') + UI.esc(UI.fmtDate(m.timestamp)) + '</div>' +
+      '<div class="fc-missing-note">⚠️ LINE 已無法提供</div>' +
+      '<button type="button" class="btn small block fc-supplement" data-msgid="' + UI.esc(String(m.lineMessageId == null ? '' : m.lineMessageId)) + '">⬆ 上傳補件</button>' +
+      '</div>';
+  }
+
+  // 檔案牆互動:上傳按鈕 / 補件 / docRole 徽章 / 分類切換 / 圖片燈箱
   $('files-body').addEventListener('click', function (e) {
+    const up = e.target.closest('.file-upload-trigger');
+    if (up) { $('file-upload-input').click(); return; }
+    const sup = e.target.closest('.fc-supplement');
+    if (sup) { startSupplement(sup.getAttribute('data-msgid')); return; }
+    const roleBadge = e.target.closest('.fc-role-badge');
+    if (roleBadge) { openDocRoleMenu(roleBadge); return; }
     const tab = e.target.closest('.file-tab');
-    if (tab) { fileTab = tab.getAttribute('data-cat'); renderFileLibrary(); return; }
+    if (tab) {
+      fileTab = tab.hasAttribute('data-role') ? ('role:' + tab.getAttribute('data-role')) : tab.getAttribute('data-cat');
+      renderFileLibrary();
+      return;
+    }
     const img = e.target.closest('.fc-thumb, .fc-open');
     if (img) { openLightbox(img.getAttribute('data-full'), img.getAttribute('data-name')); }
   });
+
+  // ---- docRole 手動修改浮動選單(PUT /api/customers/:chatId/files/:id/docRole) ----
+  let docRoleMenuEl = null;
+  function closeDocRoleMenu() {
+    if (docRoleMenuEl) { docRoleMenuEl.remove(); docRoleMenuEl = null; }
+    document.removeEventListener('click', onDocRoleOutside, true);
+    document.removeEventListener('keydown', onDocRoleKey, true);
+  }
+  function onDocRoleOutside(e) {
+    if (docRoleMenuEl && !docRoleMenuEl.contains(e.target) && !e.target.closest('.fc-role-badge')) closeDocRoleMenu();
+  }
+  function onDocRoleKey(e) { if (e.key === 'Escape') closeDocRoleMenu(); }
+
+  function openDocRoleMenu(badge) {
+    closeDocRoleMenu();
+    const fileId = badge.getAttribute('data-file-id');
+    if (!fileId) return;
+    const cur = badge.getAttribute('data-role') || '';
+    const menu = document.createElement('div');
+    menu.className = 'docrole-menu';
+    let html = '<div class="docrole-menu-title">文件分類</div>';
+    DOCROLE_CHOICES.forEach(function (r) {
+      html += '<button type="button" class="docrole-opt' + (r === cur ? ' sel' : '') +
+        '" data-role="' + UI.esc(r) + '"><span class="badge docrole ' + (DOCROLE_CLASS[r] || 'dr-other') + '">' +
+        UI.esc(r) + '</span></button>';
+    });
+    if (cur) html += '<button type="button" class="docrole-opt docrole-clear" data-role="">清除分類</button>';
+    menu.innerHTML = html;
+    document.body.appendChild(menu);
+    // 定位於徽章下方(position:fixed,用視窗座標),避免超出右緣
+    const rect = badge.getBoundingClientRect();
+    const mw = 172;
+    const maxLeft = document.documentElement.clientWidth - mw - 8;
+    menu.style.top = (rect.bottom + 4) + 'px';
+    menu.style.left = Math.max(8, Math.min(rect.left, maxLeft)) + 'px';
+    docRoleMenuEl = menu;
+    menu.addEventListener('click', function (ev) {
+      const opt = ev.target.closest('.docrole-opt');
+      if (!opt) return;
+      applyDocRole(fileId, opt.getAttribute('data-role'));
+    });
+    // 延後掛外部關閉監聽,免得觸發本次點擊立即關閉
+    setTimeout(function () {
+      document.addEventListener('click', onDocRoleOutside, true);
+      document.addEventListener('keydown', onDocRoleKey, true);
+    }, 0);
+  }
+
+  async function applyDocRole(fileId, role) {
+    closeDocRoleMenu();
+    try {
+      await API.put(
+        '/api/customers/' + encodeURIComponent(chatId) + '/files/' + encodeURIComponent(fileId) + '/docRole',
+        { docRole: role ? role : null }
+      );
+      await loadFiles();
+      refreshAuditIfOpen();
+    } catch (e) {
+      alert('修改文件分類失敗:' + e.message);
+    }
+  }
 
   // ---- 燈箱(圖片全屏預覽,可左右切換同類圖片,Esc/點背景關閉) ----
   let lightboxImgs = [];
@@ -730,9 +974,8 @@
   }
   function openLightbox(url, name) {
     ensureLightbox();
-    // 收集目前顯示分類的所有圖片,供左右切換
-    const shown = fileTab === 'all' ? allFiles : allFiles.filter(function (f) { return f._cat === fileTab; });
-    lightboxImgs = shown.filter(function (f) { return f._cat === 'image'; })
+    // 收集目前篩選下(兩區合併)的所有實體圖片,供左右切換;占位卡無實體不納入
+    lightboxImgs = allFiles.filter(function (f) { return f._cat === 'image' && matchesTab(f); })
       .map(function (f) { return { url: fileUrl(f), name: f.fileName || '' }; });
     lightboxIdx = Math.max(0, lightboxImgs.findIndex(function (x) { return x.url === url; }));
     if (lightboxImgs.length === 0) lightboxImgs = [{ url: url, name: name || '' }];
@@ -822,7 +1065,8 @@
     }
   }
 
-  // ---- 建檔完成後等待自動總結落庫(每 5 秒查一次,最多 60 秒) ----
+  // ---- 建檔完成後等待自動總結落庫(每 5 秒查一次,最多 90 秒) ----
+  // 出現 createdAt >= completedAt 的新總結即 renderSummary + loadProgress(灯號/階段同步),不需手動刷新。
   let summaryWatchTimer = null;
   function watchForNewSummary(sinceTs) {
     if (summaryWatchTimer) clearInterval(summaryWatchTimer);
@@ -830,20 +1074,25 @@
     summaryWatchTimer = setInterval(async function () {
       if (document.visibilityState === 'hidden') return; // 背景分頁暫停(不計次數),回前景繼續等待
       tries++;
-      if (tries > 12) { // 逾時:LLM 未配置或生成失敗,交由使用者手動「重新生成總結」
+      if (tries > 18) { // 逾時 90 秒:LLM 未配置或生成失敗,交由使用者手動「重新生成總結」
         clearInterval(summaryWatchTimer);
         summaryWatchTimer = null;
         return;
       }
       try {
-        const data = await API.get(api + '/summaries');
+        // 建檔是整體(orderId 0)操作,固定觀察整體總結
+        const data = await API.getSummariesFor(chatId, 0);
         const list = (data && data.summaries) || [];
         list.sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
         if (list.length > 0 && (list[0].createdAt || 0) >= sinceTs) {
           clearInterval(summaryWatchTimer);
           summaryWatchTimer = null;
-          renderSummary(list[0]);
-          loadCustomer(); // 階段可能被自動總結更新
+          loadCustomer();  // 階段徽章可能被自動總結更新
+          // 若使用者停留在整體視圖才刷新總結/進度面板;切到某訂單時不覆蓋其面板
+          if (currentOrderId === 0) {
+            renderSummary(list[0]);
+            loadProgress();  // 自動總結會重跑 taskStatus + currentStage → 刷新進度面板紅綠燈與死線
+          }
         }
       } catch (e) {
         // 查詢失敗不中斷輪詢,下次再試
@@ -1053,12 +1302,11 @@
     if (window.CSS && CSS.escape) return CSS.escape(String(s));
     return String(s).replace(/["\\\]]/g, '\\$&');
   }
-  function p2(n) { return n < 10 ? '0' + n : '' + n; }
   function msToDateInput(ms) {
     if (!ms) return '';
     const d = new Date(Number(ms));
     if (isNaN(d.getTime())) return '';
-    return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate());
+    return d.getFullYear() + '-' + UI.pad2(d.getMonth() + 1) + '-' + UI.pad2(d.getDate());
   }
   function dateInputToMs(str) {
     if (!str) return null;
@@ -1087,7 +1335,7 @@
       const val = sel.value;
       sel.disabled = true;
       try {
-        const data = await API.putMeta(chatId, { stageOverride: val });
+        const data = await API.putMetaFor(chatId, currentOrderId, { stageOverride: val });
         if (data && data.progress) {
           progressData = data.progress;
           renderStageOverrideState(data.progress);
@@ -1107,14 +1355,17 @@
   })();
 
   async function loadProgress() {
+    const seq = orderReqSeq; // 捕獲當下範圍序號;回應到達時序號已變(切換訂單)則捨棄
     let p;
     try {
-      p = await API.getProgress(chatId);
+      p = await API.getProgressFor(chatId, currentOrderId);
     } catch (e) {
+      if (seq !== orderReqSeq) return; // 已切換訂單,捨棄過期錯誤
       $('progress-card').hidden = false;
       $('progress-body').innerHTML = UI.errorHtml('進度載入失敗:' + e.message);
       return;
     }
+    if (seq !== orderReqSeq) return; // 已切換訂單,捨棄過期結果(勿蓋掉新訂單的進度/死線橫幅)
     progressData = p;
     if (Object.keys(expandedStages).length === 0 && p.currentStage) {
       expandedStages[p.currentStage] = true; // 首次預設展開當前階段
@@ -1171,7 +1422,7 @@
       deadlineAt = ms;
     }
     try {
-      const data = await API.putMeta(chatId, { deadlineAt: deadlineAt });
+      const data = await API.putMetaFor(chatId, currentOrderId, { deadlineAt: deadlineAt });
       if (data && data.progress) { progressData = data.progress; loadProgress(); }
       refreshAuditIfOpen();
     } catch (e) { alert('設定死線失敗:' + e.message); }
@@ -1323,8 +1574,9 @@
     if (el.classList && el.classList.contains('meta-text')) {
       const key = el.dataset.meta;
       const val = el.value;
+      const oid = currentOrderId; // 綁定打字當下的訂單:600ms 內切換也寫回原訂單,不污染他單
       clearTimeout(metaTextDebounce[key]);
-      metaTextDebounce[key] = setTimeout(function () { commitMeta(key, val, false); }, 600);
+      metaTextDebounce[key] = setTimeout(function () { commitMeta(key, val, false, oid); }, 600);
     }
   });
 
@@ -1344,9 +1596,9 @@
     const newDone = btn.dataset.done !== '1';
     btn.disabled = true;
     try {
-      await API.putTask(chatId, taskKey, newDone);
+      await API.putTaskFor(chatId, currentOrderId, taskKey, newDone);
       await loadProgress();  // currentStage 可能推進 → 整體重繪(保留展開狀態)
-      loadCustomer();        // 頂欄/資訊階段徽章同步
+      loadCustomer();        // 頂欄/資訊階段徽章同步(整體模式;訂單模式不影響客戶階段)
       refreshAuditIfOpen();
     } catch (e) {
       btn.disabled = false;
@@ -1362,7 +1614,7 @@
     const input = window.prompt('補充/修改此任務的證據(例:客戶 7/1『已用印 請收』)。清空則移除證據:', cur);
     if (input === null) return; // 取消
     try {
-      await API.putTask(chatId, taskKey, done, input); // 帶 evidence(第 4 參數)
+      await API.putTaskFor(chatId, currentOrderId, taskKey, done, input); // 帶 evidence
       await loadProgress();
       refreshAuditIfOpen();
     } catch (e) {
@@ -1371,12 +1623,14 @@
   }
 
   // rerender=true(天數/起始日,會改預計完成)才整體重繪;物流文字不重繪以免打字中失焦
-  async function commitMeta(key, value, rerender) {
+  async function commitMeta(key, value, rerender, orderId) {
+    const oid = (orderId != null) ? orderId : currentOrderId; // 未指定則用當前訂單(num/date 走 change,同步捕獲)
     const patch = {};
     patch[key] = value;
     try {
-      const data = await API.putMeta(chatId, patch);
-      if (data && data.progress) {
+      const data = await API.putMetaFor(chatId, oid, patch);
+      // 回應套用到畫面前確認仍在該訂單視圖,避免把 A 單的進度套到已切換的 B 單
+      if (oid === currentOrderId && data && data.progress) {
         progressData = data.progress;
         renderStageOverrideState(data.progress);
         if (rerender) renderProgress(data.progress);
@@ -1607,38 +1861,87 @@
     setTimeout(function () { card.classList.remove('flash'); }, 1600);
   }
 
-  // ================= 檔案上傳(檔案牆) =================
-  $('file-upload-btn').addEventListener('click', function () { $('file-upload-input').click(); });
+  // ================= 檔案上傳(檔案牆:一般上傳 / 缺檔補件) =================
+  // 上傳按鈕已改由「工作台上傳」區塊內的 .file-upload-trigger 觸發(files-body 事件委派)。
+  let supplementMsgId = null; // 非 null 時,下一次檔案選取視為「上傳補件」,帶 lineMessageId 關聯占位
+  let fileUploading = false;  // 防重複上傳
   $('file-upload-input').addEventListener('change', function () {
     const f = this.files && this.files[0];
     this.value = '';
-    if (f) doFileUpload(f);
+    const mid = supplementMsgId;
+    supplementMsgId = null;
+    if (f) doFileUpload(f, mid);
   });
-  async function doFileUpload(file) {
+  function startSupplement(msgId) {
+    supplementMsgId = msgId != null ? String(msgId) : '';
+    $('file-upload-input').click();
+  }
+
+  // 帶額外欄位的上傳(供補件帶 lineMessageId);沿用 /files/upload 端點
+  function uploadFileXhr(file, extraFields, onProgress) {
+    return new Promise(function (resolve, reject) {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/customers/' + encodeURIComponent(chatId) + '/files/upload');
+      xhr.responseType = 'json';
+      xhr.setRequestHeader('Accept', 'application/json');
+      if (xhr.upload && typeof onProgress === 'function') {
+        xhr.upload.addEventListener('progress', function (e) {
+          if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total);
+        });
+      }
+      xhr.addEventListener('load', function () {
+        const data = xhr.response;
+        if (xhr.status >= 200 && xhr.status < 300) { resolve(data || {}); return; }
+        const err = new Error((data && (data.error || data.message)) || ('HTTP ' + xhr.status));
+        err.status = xhr.status; err.data = data; reject(err);
+      });
+      xhr.addEventListener('error', function () {
+        const err = new Error('無法連線到後端服務,請確認後端程式是否已啟動(連接埠 4680)');
+        err.status = 0; reject(err);
+      });
+      const fd = new FormData();
+      if (extraFields) Object.keys(extraFields).forEach(function (k) {
+        if (extraFields[k] != null && extraFields[k] !== '') fd.append(k, String(extraFields[k]));
+      });
+      fd.append('file', file, file.name);
+      xhr.send(fd);
+    });
+  }
+
+  async function doFileUpload(file, lineMessageId) {
+    if (fileUploading) return;
+    fileUploading = true;
+    const isSup = lineMessageId != null && lineMessageId !== '';
     const wrap = $('upload-progress');
     const fill = $('upload-fill');
     const label = $('upload-label');
     const err = $('upload-err');
-    const btn = $('file-upload-btn');
+    const verb = isSup ? '上傳補件… ' : '上傳中… ';
     err.hidden = true; err.textContent = '';
-    wrap.hidden = false; fill.style.width = '0%'; label.textContent = '上傳中… 0%';
-    btn.disabled = true;
+    wrap.hidden = false; fill.style.width = '0%'; label.textContent = verb + '0%';
     try {
-      await API.uploadFile(chatId, file, function (r) {
+      const onProg = function (r) {
         const pct = Math.round(r * 100);
         fill.style.width = pct + '%';
-        label.textContent = '上傳中… ' + pct + '%';
-      });
+        label.textContent = verb + pct + '%';
+      };
+      // 補件走本地 XHR 以帶 lineMessageId 關聯占位;一般上傳沿用 API.uploadFile(內建 401 轉跳)
+      if (isSup) await uploadFileXhr(file, { lineMessageId: lineMessageId }, onProg);
+      else await API.uploadFile(chatId, file, onProg);
       fill.style.width = '100%'; label.textContent = '完成';
       setTimeout(function () { wrap.hidden = true; }, 800);
-      await loadFiles();
-      loadCustomer(); // 檔案數更新
+      await loadFiles();   // 補件成功後,若後端已關聯 lineMessageId,占位卡自然消失
+      loadCustomer();      // 檔案數更新
     } catch (e) {
       wrap.hidden = true;
+      if (e.status === 401) {
+        location.href = 'login.html?next=' + encodeURIComponent(location.pathname + location.search);
+        return;
+      }
       err.hidden = false;
-      err.textContent = '上傳失敗:' + e.message;
+      err.textContent = (isSup ? '補件上傳失敗:' : '上傳失敗:') + e.message;
     } finally {
-      btn.disabled = false;
+      fileUploading = false;
     }
   }
 
@@ -1804,6 +2107,208 @@
     });
   })();
 
+  // ================= 訂單列(整體 + 各訂單日期範圍切片) =================
+  const orderBar = $('order-bar');
+
+  function findOrder(orderId) {
+    const oid = Number(orderId);
+    return ordersList.filter(function (o) { return Number(o.id) === oid; })[0] || null;
+  }
+  function orderRangeLabel(o) {
+    const f = o.fromDate ? UI.fmtDate(o.fromDate) : '';
+    const t = o.toDate ? UI.fmtDate(o.toDate) : '';
+    if (f && t) return f + ' ~ ' + t;
+    return f || t || '';
+  }
+  function orderTabTitle(o) {
+    const title = (o.title != null ? String(o.title) : '').trim();
+    return title || orderRangeLabel(o) || ('訂單 #' + o.id);
+  }
+
+  async function loadOrders() {
+    try {
+      const data = await API.getOrders(chatId);
+      ordersList = (data && data.orders) || [];
+    } catch (e) {
+      ordersList = []; // 訂單端點載入失敗:退回只有「整體」,不影響整體視圖運作
+    }
+    // 目前選中的訂單若已不存在(被刪/失敗)→ 回退整體
+    if (currentOrderId !== 0 && !findOrder(currentOrderId)) currentOrderId = 0;
+    renderOrderBar();
+  }
+
+  function renderOrderBar() {
+    const parts = [];
+    parts.push('<span class="order-bar-label">訂單</span>');
+    parts.push('<button type="button" class="order-tab' + (currentOrderId === 0 ? ' active' : '') +
+      '" data-order="0">整體</button>');
+    ordersList.forEach(function (o) {
+      const oid = Number(o.id);
+      const active = oid === currentOrderId;
+      // 有自訂標題時,子行補上日期範圍;標題本身即為範圍時不重複
+      const sub = (o.title && String(o.title).trim()) ? orderRangeLabel(o) : '';
+      parts.push(
+        '<span class="order-tab' + (active ? ' active' : '') + '" data-order="' + oid +
+        '" role="button" tabindex="0" title="切換到此訂單範圍">' +
+        '<span class="order-tab-main">' + UI.esc(orderTabTitle(o)) + '</span>' +
+        (sub ? '<span class="order-tab-sub">' + UI.esc(sub) + '</span>' : '') +
+        '<span class="order-tab-actions">' +
+        '<button type="button" class="order-tab-mini" data-edit="' + oid + '" title="編輯訂單">✎</button>' +
+        '<button type="button" class="order-tab-mini" data-del="' + oid + '" title="刪除訂單">🗑</button>' +
+        '</span></span>'
+      );
+    });
+    parts.push('<button type="button" class="order-add-btn" data-add="1">➕ 新增訂單</button>');
+    if (currentOrderId !== 0) {
+      const cur = findOrder(currentOrderId);
+      parts.push('<span class="order-scope-hint">目前檢視:' +
+        UI.esc(cur ? orderTabTitle(cur) : ('訂單 #' + currentOrderId)) + ' 範圍(進度 / 總結 / 對話)</span>');
+    }
+    orderBar.innerHTML = parts.join('');
+    orderBar.hidden = false;
+  }
+
+  // 切換 orderId:重載進度 / 總結 / 對話時間軸的範圍(死線橫幅由 loadProgress 內含更新)
+  function switchOrder(orderId) {
+    const oid = Number(orderId) || 0;
+    if (oid === currentOrderId) return;
+    currentOrderId = oid;
+    orderReqSeq++; // 使前一訂單仍在途的 scoped 載入失效(下方三個載入捕獲新序號)
+    renderOrderBar();
+    loadProgress();
+    loadSummary();
+    loadMessages(null);
+  }
+
+  // 重載目前 orderId 範圍的三個面板(建立/編輯/刪除訂單後共用)
+  function reloadScopedPanels() {
+    orderReqSeq++; // 範圍已變(切換/日期改動)→ 使仍在途的舊 scoped 載入失效
+    loadProgress();
+    loadSummary();
+    loadMessages(null);
+  }
+
+  orderBar.addEventListener('click', function (e) {
+    const editBtn = e.target.closest('[data-edit]');
+    if (editBtn) { openOrderModal(findOrder(Number(editBtn.dataset.edit))); return; }
+    const delBtn = e.target.closest('[data-del]');
+    if (delBtn) { removeOrder(Number(delBtn.dataset.del)); return; }
+    const addBtn = e.target.closest('[data-add]');
+    if (addBtn) { openOrderModal(null); return; }
+    const tab = e.target.closest('[data-order]');
+    if (tab) { switchOrder(Number(tab.dataset.order)); return; }
+  });
+  orderBar.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    // 真正的按鈕(✎/🗑 迷你鈕、整體/新增鈕)保有原生鍵盤啟用,勿攔成切換訂單;
+    // 只有 role=button 的 <span> 訂單頁籤需要這段合成鍵盤處理
+    if (e.target.closest('button')) return;
+    const tab = e.target.closest('[data-order]');
+    if (tab && tab.getAttribute('role') === 'button') {
+      e.preventDefault();
+      switchOrder(Number(tab.dataset.order));
+    }
+  });
+
+  // 新增 / 編輯訂單浮層(order=null 建立,否則編輯)
+  function openOrderModal(order) {
+    if (document.getElementById('order-overlay')) return;
+    const isEdit = !!order;
+    const overlay = document.createElement('div');
+    overlay.id = 'order-overlay';
+    overlay.className = 'modal-overlay';
+    const card = document.createElement('div');
+    card.className = 'modal-card';
+    const fromVal = isEdit && order.fromDate ? msToDateInput(order.fromDate) : '';
+    const toVal = isEdit && order.toDate ? msToDateInput(order.toDate) : '';
+    const titleVal = isEdit && order.title ? String(order.title) : '';
+    card.innerHTML =
+      '<h2>' + (isEdit ? '編輯訂單' : '新增訂單') + '</h2>' +
+      '<div class="order-modal-row">' +
+      '<div class="order-modal-field"><label for="order-from">起始日期</label>' +
+      '<input id="order-from" type="date" value="' + UI.esc(fromVal) + '"></div>' +
+      '<div class="order-modal-field"><label for="order-to">結束日期</label>' +
+      '<input id="order-to" type="date" value="' + UI.esc(toVal) + '"></div>' +
+      '</div>' +
+      '<div class="order-modal-field"><label for="order-title">標題(可選,預設「訂單 M/D~M/D」)</label>' +
+      '<input id="order-title" type="text" maxlength="60" placeholder="例:中秋禮盒 3000 個" value="' +
+      UI.esc(titleVal) + '"></div>' +
+      '<div class="modal-err" id="order-err"></div>' +
+      '<div class="modal-actions">' +
+      '<button type="button" class="btn" id="order-cancel">取消</button>' +
+      '<button type="button" class="btn primary" id="order-ok">' + (isEdit ? '儲存' : '建立') + '</button>' +
+      '</div>';
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    const errBox = card.querySelector('#order-err');
+    const okBtn = card.querySelector('#order-ok');
+    function close() { overlay.remove(); }
+
+    async function submit() {
+      const fromMs = dateInputToMs(card.querySelector('#order-from').value);
+      let toMs = dateInputToMs(card.querySelector('#order-to').value);
+      const title = card.querySelector('#order-title').value.trim();
+      if (!fromMs || !toMs) { errBox.textContent = '請選擇起始與結束日期'; return; }
+      if (toMs < fromMs) { errBox.textContent = '結束日期不可早於起始日期'; return; }
+      // 結束日含當日:存當日 23:59:59.999(顯示仍為 23:59:59,契約建議;
+      // 用 -1ms 而非 -1000ms,消除後端 BETWEEN 閉區間在最後一秒內的亞秒級漏窗)
+      toMs = toMs + (24 * 60 * 60 * 1000 - 1);
+      const body = { fromDate: fromMs, toDate: toMs };
+      if (title) body.title = title;
+      errBox.textContent = '';
+      okBtn.disabled = true;
+      try {
+        if (isEdit) {
+          await API.updateOrder(chatId, order.id, body);
+          await loadOrders();
+          if (currentOrderId === Number(order.id)) reloadScopedPanels(); // 日期範圍改變 → 重載
+          close();
+        } else {
+          const res = await API.createOrder(chatId, body);
+          const newId = res && res.order && res.order.id ? Number(res.order.id) : 0;
+          await loadOrders();
+          close();
+          if (newId) {
+            currentOrderId = newId;
+            renderOrderBar();
+            reloadScopedPanels();
+            alert('訂單已建立。可於右上角按「重新生成總結」為此訂單的日期範圍產生總結。');
+          }
+        }
+      } catch (e) {
+        errBox.textContent = (isEdit ? '儲存' : '建立') + '失敗:' + e.message;
+        okBtn.disabled = false;
+      }
+    }
+    okBtn.addEventListener('click', submit);
+    card.querySelector('#order-cancel').addEventListener('click', close);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    card.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        if (e.isComposing || e.keyCode === 229) return; // 輸入法選字中
+        e.preventDefault();
+        submit();
+      }
+    });
+    card.querySelector('#order-from').focus();
+  }
+
+  async function removeOrder(orderId) {
+    const o = findOrder(orderId);
+    const name = o ? orderTabTitle(o) : ('訂單 #' + orderId);
+    if (!window.confirm('確定刪除「' + name + '」?此訂單的總結與進度將一併刪除,且無法復原。')) return;
+    try {
+      await API.deleteOrder(chatId, orderId);
+    } catch (e) {
+      alert('刪除失敗:' + (e.status === 403 ? '僅限管理員或建立者可刪除' : e.message));
+      return;
+    }
+    if (currentOrderId === Number(orderId)) currentOrderId = 0; // 刪的是當前訂單 → 回整體
+    await loadOrders();
+    reloadScopedPanels();
+  }
+
   // ================= 啟動 =================
   (async function init() {
     $('page-state').innerHTML = UI.loadingHtml('載入客戶資料…');
@@ -1816,7 +2321,7 @@
     // 先載檔案(建立 hash→連結對照),再載訊息;其餘並行
     await Promise.allSettled([
       loadCustomer(), loadFiles(), loadNotes(), loadSummary(),
-      loadSyncStatus(), loadProgress(), pollTeamMessages(true)
+      loadSyncStatus(), loadProgress(), loadOrders(), pollTeamMessages(true)
     ]);
     $('page-state').innerHTML = '';
     $('detail-grid').hidden = false;

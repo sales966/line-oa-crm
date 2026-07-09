@@ -70,6 +70,7 @@
   function get(path) { return request(path, { method: 'GET' }); }
   function post(path, body) { return request(path, { method: 'POST', body: body }); }
   function put(path, body) { return request(path, { method: 'PUT', body: body }); }
+  function del(path) { return request(path, { method: 'DELETE' }); }
 
   // ---------- 階段(stage)對照 ----------
   // 後端權威 5 階段(stageTemplate.ts STAGE_ORDER,由 progressService.computeCurrentStage
@@ -154,6 +155,17 @@
   /** 送出建檔請求(upsert 為 pending) */
   function requestFullSync(chatId) {
     return post('/api/customers/' + encodeURIComponent(chatId) + '/full-sync');
+  }
+
+  // ---------- 總覽儀表板(index.html 頂部) ----------
+  // GET /api/dashboard/stats → {totalCustomers, byStage:{階段:數量}, followedUpCount, withSummary, buildDone}
+  function getDashboardStats() {
+    return get('/api/dashboard/stats');
+  }
+  // GET /api/dashboard/reminders → {reminders:[{lineChatId,customerName,currentStage,kind,dueAt,daysLeft,note}]}
+  // 逾期/臨近的待辦(大貨死線/打樣/生產),後端已按急迫度排序(daysLeft 升序)
+  function getDashboardReminders() {
+    return get('/api/dashboard/reminders');
   }
 
   // ---------- 團隊內部討論(客戶不可見) ----------
@@ -383,6 +395,93 @@
   /** PUT 階段參數(天數/物流/手動鎖定階段;只送要改的欄位) → {ok, progress} */
   function putMeta(chatId, patch) {
     return put('/api/customers/' + encodeURIComponent(chatId) + '/progress/meta', patch);
+  }
+
+  // ---------- 訂單(一客戶多張訂單,各自為一段日期範圍的對話切片) ----------
+  // 訂單進度走隔離端點 /order-progress(order_stage_tasks / order_stage_meta),
+  // 帶 orderId;orderId=0(整體視圖)一律走既有 /progress、/summaries、/messages,行為不變。
+
+  function custBase(chatId) { return '/api/customers/' + encodeURIComponent(chatId); }
+
+  /** orderId>0 才帶 orderId 查詢字串;可併入 extra 參數(物件)。回傳 '' 或 '?a=1&orderId=N' */
+  function orderQS(orderId, extra) {
+    const p = new URLSearchParams();
+    if (extra) {
+      Object.keys(extra).forEach(function (k) {
+        if (extra[k] !== undefined && extra[k] !== null) p.set(k, String(extra[k]));
+      });
+    }
+    const oid = Number(orderId) || 0;
+    if (oid > 0) p.set('orderId', String(oid));
+    const s = p.toString();
+    return s ? ('?' + s) : '';
+  }
+
+  /** GET 訂單清單 → {orders:[{id,title,fromDate,toDate,createdByName,...}]}(倒序) */
+  function getOrders(chatId) {
+    return get(custBase(chatId) + '/orders');
+  }
+  /** POST 建訂單 body {title?,fromDate,toDate} → {ok,order} */
+  function createOrder(chatId, body) {
+    return post(custBase(chatId) + '/orders', body);
+  }
+  /** PUT 編輯訂單 body {title?,fromDate?,toDate?} → {ok,order} */
+  function updateOrder(chatId, orderId, patch) {
+    return put(custBase(chatId) + '/orders/' + encodeURIComponent(orderId), patch);
+  }
+  /** DELETE 訂單(連帶其 summaries/stage_tasks/stage_meta;僅管理或建立者) → {ok} */
+  function deleteOrder(chatId, orderId) {
+    return del(custBase(chatId) + '/orders/' + encodeURIComponent(orderId));
+  }
+
+  // ---- 進度:orderId>0 走 /order-progress;0 走既有 /progress(零回歸) ----
+
+  /** GET 進度 → 形狀同 getProgress */
+  function getProgressFor(chatId, orderId) {
+    const oid = Number(orderId) || 0;
+    return oid > 0
+      ? get(custBase(chatId) + '/order-progress' + orderQS(oid))
+      : getProgress(chatId);
+  }
+  /** PUT 單一任務紅綠燈(帶 orderId 時打隔離端點) */
+  function putTaskFor(chatId, orderId, taskKey, done, evidence) {
+    const oid = Number(orderId) || 0;
+    if (oid <= 0) return putTask(chatId, taskKey, done, evidence);
+    const body = { done: done ? 1 : 0 };
+    if (evidence !== undefined) body.evidence = evidence;
+    return put(
+      custBase(chatId) + '/order-progress/task/' + encodeURIComponent(taskKey) + orderQS(oid),
+      body
+    );
+  }
+  /** PUT 階段參數(帶 orderId 時打隔離端點) */
+  function putMetaFor(chatId, orderId, patch) {
+    const oid = Number(orderId) || 0;
+    return oid > 0
+      ? put(custBase(chatId) + '/order-progress/meta' + orderQS(oid), patch)
+      : putMeta(chatId, patch);
+  }
+
+  // ---- 總結 / 訊息 / 產生總結:orderId 併入查詢字串(0 → 不帶,現狀) ----
+
+  /** GET 總結清單(orderId 範圍) → {summaries:[...]} */
+  function getSummariesFor(chatId, orderId) {
+    return get(custBase(chatId) + '/summaries' + orderQS(orderId));
+  }
+  /** GET 訊息(orderId 範圍 + keyset 分頁 before/beforeId/limit) → {messages:[...]} */
+  function getMessagesFor(chatId, orderId, opts) {
+    const extra = {};
+    if (opts) {
+      if (opts.limit !== undefined && opts.limit !== null) extra.limit = opts.limit;
+      if (opts.before !== undefined && opts.before !== null) extra.before = opts.before;
+      if (opts.beforeId !== undefined && opts.beforeId !== null) extra.beforeId = opts.beforeId;
+    }
+    return get(custBase(chatId) + '/messages' + orderQS(orderId, extra));
+  }
+  /** POST 產生/重生總結(orderId 範圍;force 時帶 force=1) → {summary,cached?} */
+  function summarizeFor(chatId, orderId, force) {
+    const extra = force ? { force: '1' } : null;
+    return post('/api/summarize/' + encodeURIComponent(chatId) + orderQS(orderId, extra));
   }
 
   // ---------- 檔案上傳(同事;multipart) ----------
@@ -688,17 +787,21 @@
   global.API = {
     request: request, get: get, post: post, put: put,
     getFullSync: getFullSync, requestFullSync: requestFullSync,
+    getDashboardStats: getDashboardStats, getDashboardReminders: getDashboardReminders,
     getTeamMessages: getTeamMessages, postTeamMessage: postTeamMessage,
     login: login, logout: logout, fetchMe: fetchMe, getUser: getUser,
     changePassword: changePassword,
     getProgress: getProgress, putTask: putTask, putMeta: putMeta,
+    getOrders: getOrders, createOrder: createOrder, updateOrder: updateOrder, deleteOrder: deleteOrder,
+    getProgressFor: getProgressFor, putTaskFor: putTaskFor, putMetaFor: putMetaFor,
+    getSummariesFor: getSummariesFor, getMessagesFor: getMessagesFor, summarizeFor: summarizeFor,
     uploadFile: uploadFile,
     suggestMentions: suggestMentions, getMyMentions: getMyMentions, readMentions: readMentions,
     editSummary: editSummary, getAnnotations: getAnnotations, addAnnotation: addAnnotation,
     getAudit: getAudit
   };
   global.UI = {
-    esc: esc, relTime: relTime, fmtDate: fmtDate, fmtDateTime: fmtDateTime,
+    esc: esc, relTime: relTime, fmtDate: fmtDate, fmtDateTime: fmtDateTime, pad2: pad2,
     fmtSize: fmtSize, parseMaybeJson: parseMaybeJson, qsParam: qsParam, debounce: debounce,
     stageLabel: stageLabel, stageBadge: stageBadge, chatTypeBadge: chatTypeBadge,
     syncBadge: syncBadge, roleBadge: roleBadge,

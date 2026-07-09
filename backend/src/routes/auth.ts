@@ -9,11 +9,17 @@ import * as authService from '../services/authService.js';
 /** 登入节流锁定提示(锁按 IP 计,不泄漏帐号是否存在) */
 const LOCKED_MSG = '登入失敗次數過多,帳號已暫時鎖定,請 1 分鐘後再試';
 
+// Secure 属性:HTTP-only LAN 部署时不可加(浏览器会丢弃 http 下的 Secure cookie,导致无法登入);
+// 部署在 HTTPS(反向代理/自签凭证)后设 env SESSION_COOKIE_SECURE=1 即启用,让 session token 不走明文。
+// 默认关闭 → 现行 HTTP LAN 行为不变,零回归。注:HTTP LAN 下 session 机密性仍依赖内网可信。
+const COOKIE_SECURE = process.env.SESSION_COOKIE_SECURE === '1';
+
 function setSessionCookie(reply: FastifyReply, token: string): void {
   reply.setCookie(authService.SESSION_COOKIE, token, {
     path: '/',
     httpOnly: true,
     sameSite: 'lax',
+    secure: COOKIE_SECURE,
     maxAge: Math.floor(authService.SESSION_TTL_MS / 1000), // 秒
   });
 }

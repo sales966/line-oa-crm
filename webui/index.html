@@ -5,6 +5,57 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>客戶列表 — LINE OA 客戶進度中樞</title>
 <link rel="stylesheet" href="app.css">
+<style>
+  /* 總覽儀表板(僅 index.html 用,內聯以免動到共用 app.css) */
+  .dashboard { margin-bottom: 18px; }
+  .dash-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .stage-dist-card { grid-column: 1 / -1; }
+  .stage-dist { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .stage-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: none; border: 1px solid transparent; border-radius: 999px;
+    padding: 2px 8px 2px 4px; cursor: pointer; line-height: 1;
+  }
+  .stage-chip:hover { background: var(--primary-soft); }
+  .stage-chip.active { border-color: var(--primary); background: var(--primary-soft); }
+  .stage-chip-count { font-weight: 700; font-size: 13px; color: var(--text); }
+
+  .reminders-card { padding: 14px 16px; }
+  .reminders-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 4px;
+  }
+  .reminders-title { font-weight: 700; font-size: 15px; }
+  .reminders-count { color: var(--text-soft); font-size: 13px; }
+  .rem-list { display: flex; flex-direction: column; }
+  .rem-item {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; padding: 9px 6px; text-align: left;
+    background: none; border: 0; border-top: 1px solid var(--border);
+    cursor: pointer; font: inherit; color: inherit;
+  }
+  .rem-list .rem-item:first-child { border-top: 0; }
+  .rem-item:hover { background: var(--primary-soft); }
+  .rem-name { font-weight: 600; white-space: nowrap; }
+  .rem-note {
+    color: var(--text-soft); font-size: 12.5px;
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .rem-days {
+    font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 999px; white-space: nowrap;
+  }
+  .rem-days.overdue { background: #fde8e8; color: var(--red); }
+  .rem-days.soon { background: #fef3c7; color: #b45309; }
+  .rem-empty { color: var(--text-faint); font-size: 13px; padding: 6px 2px; }
+  @media (max-width: 560px) {
+    .rem-note { display: none; }
+  }
+</style>
 </head>
 <body>
 
@@ -15,12 +66,34 @@
 
 <main class="page">
 
-  <!-- 統計卡 -->
-  <section class="stats">
-    <div class="card stat-card">
-      <div class="label">客戶數</div>
-      <div class="value" id="stat-customers">—</div>
+  <!-- 總覽儀表板:統計卡 + 待辦提醒 -->
+  <section class="dashboard">
+    <div class="dash-cards">
+      <div class="card stat-card">
+        <div class="label">客戶數</div>
+        <div class="value" id="dash-customers">—</div>
+      </div>
+      <div class="card stat-card">
+        <div class="label">待處理</div>
+        <div class="value" id="dash-pending">—</div>
+      </div>
+      <div class="card stat-card stage-dist-card">
+        <div class="label">各階段分布</div>
+        <div class="stage-dist" id="dash-stages"><span class="rem-empty">載入中…</span></div>
+      </div>
     </div>
+
+    <section class="card reminders-card">
+      <div class="reminders-head">
+        <span class="reminders-title">⏰ 待辦提醒</span>
+        <span class="reminders-count" id="reminders-count"></span>
+      </div>
+      <div id="reminders-body"><span class="rem-empty">載入中…</span></div>
+    </section>
+  </section>
+
+  <!-- 系統計數 -->
+  <section class="stats">
     <div class="card stat-card">
       <div class="label">訊息數</div>
       <div class="value" id="stat-messages">—</div>
@@ -91,7 +164,6 @@
     try {
       const h = await API.get('/api/health');
       const counts = (h && h.counts) || {};
-      $('stat-customers').textContent = counts.customers != null ? counts.customers : '—';
       $('stat-messages').textContent = counts.messages != null ? counts.messages : '—';
       $('stat-files').textContent = counts.files != null ? counts.files : '—';
       const llmOk = h && h.llm && h.llm !== 'disabled';
@@ -103,6 +175,107 @@
       $('stat-llm').textContent = '—';
     }
   }
+
+  // ---- 總覽儀表板(統計卡 + 待辦提醒) ----
+  // 階段徽章條的顯示順序:五階段 + 流失(取自 api.js STAGE_OPTIONS),其餘殘留值附於末尾
+  const STAGE_ORDER = UI.STAGE_OPTIONS.filter(function (o) { return o.value; }).map(function (o) { return o.value; });
+
+  // silent = true(定時自動刷新)時,失敗不覆蓋既有內容
+  async function loadDashboard(silent) {
+    silent = silent === true;
+    let stats, rem;
+    try {
+      const res = await Promise.all([API.getDashboardStats(), API.getDashboardReminders()]);
+      stats = res[0];
+      rem = res[1];
+    } catch (e) {
+      if (!silent) {
+        $('dash-stages').innerHTML = '<span class="rem-empty">統計載入失敗</span>';
+        $('reminders-body').innerHTML = '<span class="rem-empty">待辦提醒載入失敗</span>';
+      }
+      return; // 靜默刷新失敗保留既有內容
+    }
+    renderStats(stats);
+    renderReminders((rem && rem.reminders) || []);
+  }
+
+  function renderStats(stats) {
+    if (!stats || typeof stats !== 'object') return;
+    dashStatsCache = stats; // 快取供切換篩選時就地重繪
+    $('dash-customers').textContent = stats.totalCustomers != null ? stats.totalCustomers : '—';
+    $('dash-pending').textContent = stats.followedUpCount != null ? stats.followedUpCount : '—';
+
+    const byStage = (stats.byStage && typeof stats.byStage === 'object') ? stats.byStage : {};
+    const keys = STAGE_ORDER.slice();
+    Object.keys(byStage).forEach(function (k) {
+      if (keys.indexOf(k) === -1) keys.push(k); // 未知殘留階段附於末尾
+    });
+    const cur = stageSel.value;
+    $('dash-stages').innerHTML = keys.map(function (st) {
+      const n = byStage[st] || 0;
+      const active = cur === st ? ' active' : '';
+      return '<button type="button" class="stage-chip' + active + '" data-stage="' + UI.esc(st) +
+        '" title="依「' + UI.esc(UI.stageLabel(st)) + '」篩選客戶">' +
+        UI.stageBadge(st) + '<span class="stage-chip-count">' + n + '</span></button>';
+    }).join('');
+  }
+
+  function renderReminders(list) {
+    const body = $('reminders-body');
+    const countEl = $('reminders-count');
+    if (!Array.isArray(list) || list.length === 0) {
+      countEl.textContent = '';
+      body.innerHTML = '<div class="rem-empty">目前沒有逾期或臨近的待辦事項 🎉</div>';
+      return;
+    }
+    countEl.textContent = '共 ' + list.length + ' 項';
+    body.innerHTML = '<div class="rem-list">' + list.map(renderReminderRow).join('') + '</div>';
+  }
+
+  function renderReminderRow(r) {
+    const chatId = (r && (r.lineChatId || r.chatId)) || '';
+    const name = (r && r.customerName) || '(未命名)';
+    const d = Number(r && r.daysLeft);
+    let cls, text;
+    if (!isFinite(d)) {
+      cls = 'soon'; text = '—';
+    } else if (d < 0) {
+      cls = 'overdue'; text = '逾期 ' + Math.abs(d) + ' 天';
+    } else if (d === 0) {
+      cls = 'overdue'; text = '今天到期';
+    } else {
+      cls = 'soon'; text = '剩 ' + d + ' 天';
+    }
+    const note = (r && r.note) || '';
+    return '<button type="button" class="rem-item" data-chatid="' + UI.esc(chatId) + '">' +
+      '<span class="rem-days ' + cls + '">' + UI.esc(text) + '</span>' +
+      '<span class="rem-name">' + UI.esc(name) + '</span>' +
+      UI.stageBadge(r && r.currentStage) +
+      '<span class="rem-note">' + UI.esc(note) + '</span>' +
+      '</button>';
+  }
+
+  // 點階段徽章 → 套用/取消該階段篩選(再點同一個取消)
+  $('dash-stages').addEventListener('click', function (ev) {
+    const chip = ev.target.closest('button.stage-chip');
+    if (!chip) return;
+    const st = chip.dataset.stage || '';
+    // 只有下拉存在該選項時才套用(未知殘留階段忽略)
+    const known = Array.prototype.some.call(stageSel.options, function (o) { return o.value === st; });
+    if (!known) return;
+    stageSel.value = (stageSel.value === st) ? '' : st;
+    loadCustomers();
+    renderStats(dashStatsCache); // 立即更新 active 標記
+  });
+
+  // 點待辦項 → 進該客戶詳情
+  $('reminders-body').addEventListener('click', function (ev) {
+    const item = ev.target.closest('button.rem-item');
+    if (!item || !item.dataset.chatid) return;
+    location.href = 'customer.html?chatId=' + encodeURIComponent(item.dataset.chatid);
+  });
+
+  let dashStatsCache = null; // 供切換篩選時就地重繪 active 標記,免重新請求
 
   // ---- 客戶列表 ----
   // silent = true(定時自動刷新)時不清空列表、不顯示載入中;失敗也不覆蓋既有內容
@@ -255,13 +428,24 @@
       return;
     }
     loadHealth();
+    loadDashboard();
     loadCustomers();
 
-    // 24x7 看板:每 60 秒自動刷新統計卡、客戶列表與相對時間(reqSeq 防競態,可安全重入)
-    setInterval(function () {
+    // 24x7 看板:每 60 秒自動刷新統計卡、待辦提醒、客戶列表與相對時間(reqSeq 防競態,可安全重入)
+    // 真正掛牆上的看板永遠可見,照常刷新;隱藏/背景分頁暫停,避免閒置分頁持續打後端
+    // (含 fillSyncStatuses 的 6 併發 full-sync worker),回前景時立即補刷一次——與 customer.html 一致
+    function autoRefresh() {
       loadHealth();
+      loadDashboard(true);
       loadCustomers(true);
+    }
+    setInterval(function () {
+      if (document.visibilityState === 'hidden') return;
+      autoRefresh();
     }, 60000);
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') autoRefresh();
+    });
   })();
 })();
 </script>
