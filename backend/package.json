@@ -19,12 +19,14 @@
     "dotenv": "^16.4.7",
     "fastify": "^5.2.0",
     "openai": "^4.77.0",
+    "qrcode": "^1.5.4",
     "tsx": "^4.19.2"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.2",
+    "@types/qrcode": "^1.5.6",
     "typescript": "^5.7.2"
   }
 }

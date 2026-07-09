@@ -1,0 +1,22 @@
+# Caddy 反向代理 + 自動 HTTPS(Let's Encrypt)範例
+# 把 crm.example.com 換成你的網域;DNS A 記錄需先指向本機公網 IP。
+# Caddy 會自動申請並續期憑證,無須手動跑 certbot。
+#
+# 用法(見 deploy-aliyun.md):將本檔放到 /etc/caddy/Caddyfile 後
+#   sudo systemctl reload caddy
+# 或以 Docker 跑 Caddy 時掛載本檔。
+
+crm.example.com {
+	# 反代到 compose 內綁在本機的後端(127.0.0.1:4680)
+	reverse_proxy 127.0.0.1:4680
+
+	# 客戶檔案上傳可達 300MB(契約上限),放寬請求體大小
+	request_body {
+		max_size 300MB
+	}
+
+	# 存取日誌(可選)
+	log {
+		output file /var/log/caddy/lineoa-access.log
+	}
+}

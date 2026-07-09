@@ -1042,3 +1042,84 @@ table.list tr.row-inactive td.cust-name, table.list tr.row-inactive td { color: 
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
+
+/* ============================================================
+   手機／平板響應式(桌面版樣式全數保留,僅在此區以 media query 覆蓋)
+   斷點:≤900px(平板・手機橫)/ ≤600px(手機直)
+   ── 只在窄屏生效,不影響既有桌面排版 ──
+   ============================================================ */
+
+/* ---------- ≤900px:頂欄換行、留白收窄、步驟條橫捲、網格自適應 ---------- */
+@media (max-width: 900px) {
+  .page { padding: 14px 14px 40px; }
+
+  /* 頂欄:允許換行,避免「標題 / 建檔鈕 / 鈴鐺 / 使用者 chip」擠爆一列 */
+  .topbar {
+    padding: 10px 14px;
+    gap: 8px 10px;
+    flex-wrap: wrap;
+  }
+  .topbar h1 { font-size: 15px; }
+  .topbar .sub { font-size: 11.5px; }
+  /* 詳情頁建檔錯誤訊息不要撐爆版面 */
+  .sync-err-inline { max-width: 170px; }
+
+  /* 卡片標題容許換行(如「AI 總結」+ 重新生成鈕、「檔案牆」+ 上傳鈕) */
+  .card .card-head { flex-wrap: wrap; }
+
+  /* 系統統計卡:每行約 2 張 */
+  .stats { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .stat-card { padding: 14px; }
+  .stat-card .value { font-size: 22px; }
+
+  /* 進度步驟條:手機改為橫向可捲動(不換行,避免高度暴增) */
+  .stepper {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 6px;
+  }
+  .stepper .step { flex: none; }
+  .stepper .step-line { flex: 0 0 12px; }
+
+  /* 對話氣泡加寬,窄屏更好讀 */
+  .bubble { max-width: 82%; }
+
+  /* 檔案牆/檔案庫網格:縮小最小欄寬,手機自適應 */
+  .file-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+}
+
+/* ---------- ≤600px:手機直式,觸控友善(主要輸入框/按鈕 ≥44px) ---------- */
+@media (max-width: 600px) {
+  .page { padding: 12px 12px 36px; }
+
+  /* 頂欄再收窄 */
+  .topbar { padding: 9px 12px; }
+  .topbar h1 { font-size: 14.5px; }
+
+  /* 系統統計卡:窄屏每行 1–2 張 */
+  .stats { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+
+  /* 觸控友善:主要按鈕、搜尋框、下拉、登入/浮層輸入至少 44px 觸控高度 */
+  .btn.primary, .btn.block { min-height: 44px; }
+  .toolbar input[type="search"], .toolbar select { min-height: 44px; }
+  .login-card input, .login-card .btn { min-height: 44px; }
+  .modal-card input[type="text"],
+  .modal-card input[type="password"],
+  .modal-card select { min-height: 44px; }
+  .modal-actions .btn { min-height: 44px; }
+  .modal-card { padding: 18px; }
+
+  /* 對話 / 內部討論:輸入區更好按 */
+  .chat-scroll { max-height: 60vh; }
+  .bubble { max-width: 88%; font-size: 14px; }
+  .team-input { padding: 8px 12px; gap: 6px; }
+  .team-input-main textarea, .team-input textarea { min-height: 44px; }
+  .team-attach-btn, .team-input .btn.primary { min-height: 44px; }
+
+  /* 檔案牆:每行兩欄,間距收斂 */
+  .file-grid { grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 8px; }
+
+  /* 燈箱關閉鈕避免貼邊 */
+  .lightbox .lb-close { top: 12px; right: 14px; }
+}

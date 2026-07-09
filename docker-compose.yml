@@ -1,0 +1,21 @@
+# LINE OA 客戶進度中樞 — 部署編排
+# 用法:在專案根目錄放好 .env 後,執行  docker compose up -d --build
+# 資料持久化:./data 與 ./storage 掛進容器,升級/重建容器資料不遺失。
+
+services:
+  backend:
+    build: .
+    image: lineoa-backend:latest
+    container_name: lineoa-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    # 只綁到本機迴環:對外一律經 Caddy/Nginx 反代 + HTTPS,不直接曝露 4680。
+    # 若真的要臨時直連測試,改成 "4680:4680"(不建議在公網這麼做)。
+    ports:
+      - "127.0.0.1:4680:4680"
+    volumes:
+      # SQLite 資料庫(app.db 等)
+      - ./data:/app/backend/data
+      # 客戶檔案永久歸檔(下載的圖片/PDF/設計檔)
+      - ./storage:/app/backend/storage

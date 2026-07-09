@@ -1,6 +1,8 @@
 /**
  * authHook.ts — 全站认证 onRequest hook。
- * - /api/* 需有效 session;豁免:/api/auth/login、/api/health、/api/ingest/*
+ * - /api/* 需有效 session;豁免:/api/auth/login、/api/health、/api/qr、/api/ingest/*
+ * - /api/extension-token:内网(PUBLIC_MODE 未设)免登入可读(登入页显示 Token);
+ *   公网(PUBLIC_MODE=1)需 session,未登入回 401
  * - /api/ingest/*(插件用):header X-Extension-Token == env EXTENSION_TOKEN;
  *   env 未设 → 默认 fail-closed(401),除非显式 ALLOW_UNAUTH_INGEST=1(仅首次引导用);
  *   设了必须相符,否则 401
@@ -37,8 +39,14 @@ export async function authOnRequest(req: FastifyRequest, reply: FastifyReply): P
     return;
   }
 
-  // 登入页免登入即可读:插件安装用的 Token(内网 LAN 场景;token 只存 .env,不硬编码进原始码)
-  if (path === '/api/auth/login' || path === '/api/health' || path === '/api/extension-token') return;
+  // /api/qr:轻量 QR 产生(登入页显示后端网址/插件下载 QR、后台手机版 QR)。
+  // 只编码 http/https URL、不涉任何机密,故与 /api/health 同级无条件豁免(公网亦然)。
+  if (path === '/api/auth/login' || path === '/api/health' || path === '/api/qr') return;
+
+  // 登入页免登入即可读:插件安装用的 Token(内网 LAN 场景;token 只存 .env,不硬编码进原始码)。
+  // 公网加固:PUBLIC_MODE=1 时改为需 session(未登入落到下方 401),避免登入页把 Token 印给任何人;
+  // PUBLIC_MODE 未设(内网现状)行为一字不变——仍免登入可读。
+  if (path === '/api/extension-token' && process.env.PUBLIC_MODE !== '1') return;
 
   const user = authService.getSessionUser(req.cookies?.[authService.SESSION_COOKIE]);
   if (!user) {

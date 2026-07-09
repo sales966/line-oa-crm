@@ -286,8 +286,13 @@
       (u && u.role === '管理' ? '<a class="user-menu-item" href="users.html">使用者管理</a>' : '') +
       '<a class="user-menu-item" href="help.html">📖 使用說明</a>' +
       '<a class="user-menu-item" href="' + esc(issuesHref) + '">🐞 問題回報</a>' +
+      '<button type="button" class="user-menu-item" data-act="qr">📱 手機版 QR</button>' +
       '<button type="button" class="user-menu-item" data-act="password">修改密碼</button>' +
       '<button type="button" class="user-menu-item danger" data-act="logout">登出</button>';
+    menu.querySelector('[data-act="qr"]').addEventListener('click', function () {
+      hideUserMenu();
+      showQrModal();
+    });
     menu.querySelector('[data-act="password"]').addEventListener('click', function () {
       hideUserMenu();
       showPasswordModal();
@@ -295,6 +300,39 @@
     menu.querySelector('[data-act="logout"]').addEventListener('click', function () {
       hideUserMenu();
       logout();
+    });
+  }
+
+  /** 手機版 QR 浮層:顯示當前後台網址的大 QR,方便跟單用手機掃碼進來 */
+  function showQrModal() {
+    if (document.getElementById('qr-overlay')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'qr-overlay';
+    overlay.className = 'modal-overlay';
+    const card = document.createElement('div');
+    card.className = 'modal-card';
+    // 掃碼後直接落在後台首頁(location.origin);QR 由後端 /api/qr 產生 SVG(免登入端點)
+    const target = location.origin;
+    const qrSrc = '/api/qr?size=480&data=' + encodeURIComponent(target);
+    card.innerHTML =
+      '<h2>📱 手機版 QR</h2>' +
+      '<p style="margin:2px 0 12px;font-size:13px;color:var(--text-soft);">用手機相機掃描,即可在手機上開啟後台。請確認手機與後端在同一內網。</p>' +
+      '<div style="text-align:center;">' +
+      '<img src="' + esc(qrSrc) + '" alt="後台網址 QR" style="width:100%;max-width:260px;height:auto;border:1px solid var(--border);border-radius:10px;background:#fff;padding:8px;box-sizing:border-box;">' +
+      '<div style="margin-top:10px;font-size:12px;color:var(--text-soft);word-break:break-all;">' + esc(target) + '</div>' +
+      '</div>' +
+      '<div class="modal-actions">' +
+      '<button type="button" class="btn primary" id="qr-close">關閉</button>' +
+      '</div>';
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+    function close() { overlay.remove(); }
+    card.querySelector('#qr-close').addEventListener('click', close);
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) close();
+    });
+    document.addEventListener('keydown', function onKey(e) {
+      if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); }
     });
   }
 

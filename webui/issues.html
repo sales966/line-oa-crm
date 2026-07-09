@@ -108,6 +108,16 @@
   .issue-admin .save-state { font-size: 12px; }
   .issue-admin .save-state.ok { color: var(--green); }
   .issue-admin .save-state.err { color: var(--red); }
+  /* 手機:觸控友善 + 管理員操作列改直向堆疊 */
+  @media (max-width: 600px) {
+    .issue-form-card input[type="text"] { min-height: 44px; }
+    .issue-form-card .btn.primary { min-height: 44px; }
+    .issue-admin { flex-direction: column; align-items: stretch; }
+    .issue-admin .fld.grow { min-width: 0; }
+    .issue-admin select,
+    .issue-admin input[type="text"],
+    .issue-admin .ia-save { min-height: 44px; }
+  }
 </style>
 </head>
 <body>

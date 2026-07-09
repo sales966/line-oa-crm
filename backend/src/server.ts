@@ -34,6 +34,7 @@ import issuesRoutes from './routes/issues.js';
 import docRoleRoutes from './routes/docrole.js';
 import dashboardRoutes from './routes/dashboard.js';
 import orderRoutes from './routes/orders.js';
+import qrRoutes from './routes/qr.js';
 
 const app = Fastify({
   logger: { level: process.env.LOG_LEVEL || 'info' },
@@ -97,7 +98,8 @@ async function main(): Promise<void> {
     }));
   }
 
-  // GET /api/extension-token — 登入页显示插件 Token(内网 LAN;token 只存 .env)
+  // GET /api/extension-token — 登入页显示插件 Token(内网 LAN;token 只存 .env)。
+  // 公网加固:PUBLIC_MODE=1 时 authHook 已要求 session,未登入者到不了这里(回 401)。
   app.get('/api/extension-token', async () => ({ token: process.env.EXTENSION_TOKEN || '' }));
 
   // GET /api/health
@@ -123,6 +125,7 @@ async function main(): Promise<void> {
   await app.register(docRoleRoutes);
   await app.register(dashboardRoutes);
   await app.register(orderRoutes);
+  await app.register(qrRoutes);
 
   // 种子:users 空表时建 admin/管理,密码取 env ADMIN_INITIAL_PASSWORD(默认 admin123)
   seedAdminIfEmpty((msg) => app.log.warn(msg));

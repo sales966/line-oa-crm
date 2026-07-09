@@ -15,6 +15,10 @@
   .lp-copy { flex-shrink: 0; font-size: 11px; padding: 3px 9px; border: 1px solid #cbd5e1; border-radius: 5px; background: #fff; cursor: pointer; color: #334155; }
   .lp-copy:hover { background: #f1f5f9; }
   .lp-steps { display: block; margin-top: 8px; font-size: 11px; color: #94a3b8; line-height: 1.6; }
+  .lp-qr-row { display: flex; gap: 14px; margin: 12px 0 4px; }
+  .lp-qr { flex: 1; min-width: 0; text-align: center; }
+  .lp-qr img { width: 100%; max-width: 120px; height: auto; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; padding: 5px; box-sizing: border-box; }
+  .lp-qr-cap { display: block; margin-top: 5px; font-size: 11px; color: #64748b; line-height: 1.4; }
 </style>
 </head>
 <body class="login-page">
@@ -43,6 +47,16 @@
       <code id="lp-token" class="lp-v">載入中…</code>
       <button type="button" class="lp-copy" data-copy="lp-token">複製</button>
     </div>
+    <div class="lp-qr-row">
+      <div class="lp-qr">
+        <img id="qr-backend" alt="後端網址 QR">
+        <span class="lp-qr-cap">手機掃碼進後台</span>
+      </div>
+      <div class="lp-qr">
+        <img id="qr-plugin" alt="下載插件 QR">
+        <span class="lp-qr-cap">手機掃碼下載插件</span>
+      </div>
+    </div>
     <small class="lp-steps">安裝:解壓 → chrome://extensions 開啟「開發人員模式」→「載入未封裝項目」選 extension-sync 資料夾 → 點插件「開啟設定」填入上方網址與 Token → 儲存。</small>
   </div>
 </main>
@@ -55,8 +69,18 @@
 
   // 後端網址 = 同仁當前連進來的網址(IP 變動也不怕);插件設定填這個
   $('lp-url').textContent = location.origin;
-  // Token 從後端讀取(只存 .env,不硬編碼進原始碼);未設定則提示洽管理員
-  fetch('/api/extension-token').then(function (r) { return r.json(); }).then(function (d) {
+  // QR:後端網址(掃碼手機直接連後台)+ 插件下載(絕對 URL 指向 /plugin.zip)。
+  // 由後端 /api/qr 產生 SVG(免登入端點);網址隨當前 origin 動態帶入。
+  $('qr-backend').src = '/api/qr?size=240&data=' + encodeURIComponent(location.origin);
+  $('qr-plugin').src = '/api/qr?size=240&data=' + encodeURIComponent(location.origin + '/plugin.zip');
+  // Token 從後端讀取(只存 .env,不硬編碼進原始碼);未設定則提示洽管理員。
+  // 公網模式(PUBLIC_MODE=1)下此端點需登入,未登入回 401 → 改提示登入後於設定取得,
+  // 不在登入頁曝露 Token。內網(未設 PUBLIC_MODE)照舊直接顯示。
+  fetch('/api/extension-token').then(function (r) {
+    if (r.status === 401) return { needLogin: true };
+    return r.json();
+  }).then(function (d) {
+    if (d && d.needLogin) { $('lp-token').textContent = '請登入後於設定取得'; return; }
     $('lp-token').textContent = (d && d.token) ? d.token : '(後端尚未設定 EXTENSION_TOKEN,請洽管理員)';
   }).catch(function () { $('lp-token').textContent = '(讀取失敗,請洽管理員)'; });
   // 一鍵複製
