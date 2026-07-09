@@ -646,7 +646,13 @@
     const btn = this;
     btn.disabled = true;
     const orig = btn.textContent;
-    btn.innerHTML = '<span class="spinner"></span> 生成中…';
+    // 顯示經過秒數:gpt-5.5 約 30–60 秒,讓「慢」有可見進度、不像卡死
+    const t0 = Date.now();
+    btn.innerHTML = '<span class="spinner"></span> 生成中… 0s';
+    const tick = setInterval(function () {
+      const s = Math.round((Date.now() - t0) / 1000);
+      btn.innerHTML = '<span class="spinner"></span> 生成中… ' + s + 's' + (s >= 25 ? '(約需30-60秒)' : '');
+    }, 1000);
     const errBox = () => $('summarize-err');
     if (errBox()) errBox().textContent = '';
     try {
@@ -669,6 +675,7 @@
       if (errBox()) errBox().textContent = msg;
       else alert(msg);
     } finally {
+      clearInterval(tick);
       btn.disabled = false;
       // 成功時 renderSummary 已更新按鈕文字;若仍停在「生成中…」(失敗路徑)則還原
       if (btn.textContent.indexOf('生成中') !== -1) btn.textContent = orig;
