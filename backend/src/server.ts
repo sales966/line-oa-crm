@@ -35,6 +35,7 @@ import docRoleRoutes from './routes/docrole.js';
 import dashboardRoutes from './routes/dashboard.js';
 import orderRoutes from './routes/orders.js';
 import qrRoutes from './routes/qr.js';
+import batchRoutes from './routes/batch.js';
 
 const app = Fastify({
   logger: { level: process.env.LOG_LEVEL || 'info' },
@@ -126,6 +127,7 @@ async function main(): Promise<void> {
   await app.register(dashboardRoutes);
   await app.register(orderRoutes);
   await app.register(qrRoutes);
+  await app.register(batchRoutes);
 
   // 种子:users 空表时建 admin/管理,密码取 env ADMIN_INITIAL_PASSWORD(默认 admin123)
   seedAdminIfEmpty((msg) => app.log.warn(msg));

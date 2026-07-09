@@ -157,6 +157,41 @@
     return post('/api/customers/' + encodeURIComponent(chatId) + '/full-sync');
   }
 
+  /**
+   * 批次建檔:一次把多個 chatId 排入建檔(各自 upsert 為 pending)。
+   * POST /api/customers/batch-full-sync {chatIds:[...]} → {ok:true, queued:N}
+   * chatIds 會去重、濾空;空陣列直接回傳不打後端。
+   */
+  function batchFullSync(chatIds) {
+    const ids = Array.isArray(chatIds)
+      ? Array.from(new Set(chatIds.map(function (x) { return String(x || '').trim(); }).filter(Boolean)))
+      : [];
+    if (ids.length === 0) return Promise.resolve({ ok: true, queued: 0 });
+    return post('/api/customers/batch-full-sync', { chatIds: ids });
+  }
+
+  // ---------- 大貨死線倒數徽章(客戶列表每列用) ----------
+  // 以「當天 00:00」為基準算整數天數差(與後端 progressService.buildDeadline 一致):
+  // <0 逾期、0 今天到期(紅)、1..7 臨近(黃)、>7 充裕(綠)。無死線回空字串。
+  function deadlineBadge(at, daysLeft) {
+    const t = Number(at);
+    if (!at || !isFinite(t)) return '';
+    var d = daysLeft;
+    if (d === undefined || d === null || !isFinite(Number(d))) {
+      const start = new Date(t); start.setHours(0, 0, 0, 0);
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      d = Math.round((start.getTime() - today.getTime()) / 86400000);
+    } else {
+      d = Number(d);
+    }
+    var cls, text;
+    if (d < 0) { cls = 'dl-overdue'; text = '逾期 ' + Math.abs(d) + ' 天'; }
+    else if (d === 0) { cls = 'dl-overdue'; text = '今天到期'; }
+    else if (d <= 7) { cls = 'dl-soon'; text = '剩 ' + d + ' 天'; }
+    else { cls = 'dl-ok'; text = '剩 ' + d + ' 天'; }
+    return '<span class="badge dl ' + cls + '" title="大貨死線 ' + esc(fmtDate(t)) + '">' + esc(text) + '</span>';
+  }
+
   // ---------- 總覽儀表板(index.html 頂部) ----------
   // GET /api/dashboard/stats → {totalCustomers, byStage:{階段:數量}, followedUpCount, withSummary, buildDone}
   function getDashboardStats() {
@@ -824,7 +859,7 @@
 
   global.API = {
     request: request, get: get, post: post, put: put,
-    getFullSync: getFullSync, requestFullSync: requestFullSync,
+    getFullSync: getFullSync, requestFullSync: requestFullSync, batchFullSync: batchFullSync,
     getDashboardStats: getDashboardStats, getDashboardReminders: getDashboardReminders,
     getTeamMessages: getTeamMessages, postTeamMessage: postTeamMessage,
     login: login, logout: logout, fetchMe: fetchMe, getUser: getUser,
@@ -842,7 +877,7 @@
     esc: esc, relTime: relTime, fmtDate: fmtDate, fmtDateTime: fmtDateTime, pad2: pad2,
     fmtSize: fmtSize, parseMaybeJson: parseMaybeJson, qsParam: qsParam, debounce: debounce,
     stageLabel: stageLabel, stageBadge: stageBadge, chatTypeBadge: chatTypeBadge,
-    syncBadge: syncBadge, roleBadge: roleBadge,
+    syncBadge: syncBadge, roleBadge: roleBadge, deadlineBadge: deadlineBadge,
     initAuth: initAuth,
     TEAM_ROLES: TEAM_ROLES,
     STAGE_OPTIONS: STAGE_OPTIONS,

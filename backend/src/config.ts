@@ -52,5 +52,7 @@ export const LLM_TIMEOUT_MS = envInt('LLM_TIMEOUT_MS', 150_000);
  * 单次总结 prompt 纳入的「最近」消息条数上限;env SUMMARIZE_MAX_MESSAGES 可覆盖。
  * 建档回填后强制总结的正是历史最庞大之时(可能上万条),不设上限会撑爆模型 context / 费用并抛错。
  * 取最近 N 条(时间倒序取后再转回正序);普通 chat(<N 条)行为不变,超大 chat 优雅降级为「最近 N 条」。
+ * 加速提示:调小本值可加速大客户总结(prompt 变短 → tokens 少 → 生成快),代价是牺牲较旧的上下文;
+ * 默认 800 不变,仅在大客户总结确实偏慢时才考虑下调(如 500),普通客户(<N 条)不受影响。
  */
 export const SUMMARIZE_MAX_MESSAGES = envInt('SUMMARIZE_MAX_MESSAGES', 800);
