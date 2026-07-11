@@ -268,7 +268,14 @@ export type SummarizeResult =
 
 export async function summarizeChat(
   chatId: string,
-  opts: { force?: boolean; actor?: AuditActor; orderId?: number; trigger?: UsageTrigger } = {}
+  opts: {
+    force?: boolean;
+    actor?: AuditActor;
+    orderId?: number;
+    trigger?: UsageTrigger;
+    /** 可选串流回呼:原样透传给 provider.summarize;不传时行为完全同现在 */
+    onDelta?: (partialSummaryText: string) => void;
+  } = {}
 ): Promise<SummarizeResult> {
   const trigger: UsageTrigger = opts.trigger === 'auto-build' ? 'auto-build' : 'manual';
   // orderId>0 走隔离的订单总结路径;orderId=0(或未带)= 整體,以下既有逻辑完全不变。
@@ -302,7 +309,7 @@ export async function summarizeChat(
   const startedAt = Date.now();
   let output: Awaited<ReturnType<typeof provider.summarize>>;
   try {
-    output = await provider.summarize(SYSTEM_PROMPT, prompt);
+    output = await provider.summarize(SYSTEM_PROMPT, prompt, { onDelta: opts.onDelta });
   } catch (err) {
     recordUsage({
       lineChatId: chatId,
@@ -508,7 +515,13 @@ function buildOrderUserPrompt(
 async function summarizeOrder(
   chatId: string,
   orderId: number,
-  opts: { force?: boolean; actor?: AuditActor; trigger?: UsageTrigger }
+  opts: {
+    force?: boolean;
+    actor?: AuditActor;
+    trigger?: UsageTrigger;
+    /** 可选串流回呼:原样透传给 provider.summarize;不传时行为完全同现在 */
+    onDelta?: (partialSummaryText: string) => void;
+  }
 ): Promise<SummarizeResult> {
   const trigger: UsageTrigger = opts.trigger === 'auto-build' ? 'auto-build' : 'manual';
   const provider = getProvider();
@@ -540,7 +553,7 @@ async function summarizeOrder(
   const startedAt = Date.now();
   let output: Awaited<ReturnType<typeof provider.summarize>>;
   try {
-    output = await provider.summarize(SYSTEM_PROMPT, prompt);
+    output = await provider.summarize(SYSTEM_PROMPT, prompt, { onDelta: opts.onDelta });
   } catch (err) {
     recordUsage({
       lineChatId: chatId,

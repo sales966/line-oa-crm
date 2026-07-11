@@ -25,6 +25,7 @@ import ingestRoutes from './routes/ingest.js';
 import readRoutes from './routes/read.js';
 import filesRoutes from './routes/files.js';
 import summarizeRoutes from './routes/summarize.js';
+import summarizeStreamRoutes from './routes/summarizeStream.js';
 import progressRoutes from './routes/progress.js';
 import summaryEditRoutes from './routes/summaryEdit.js';
 import auditRoutes from './routes/audit.js';
@@ -38,6 +39,11 @@ import qrRoutes from './routes/qr.js';
 import batchRoutes from './routes/batch.js';
 import usageRoutes from './routes/usage.js';
 import adminHealthRoutes from './routes/admin-health.js';
+import tagsRoutes from './routes/tags.js';
+import searchRoutes from './routes/search.js';
+import exportRoutes from './routes/export.js';
+import backupRoutes from './routes/backup.js';
+import * as backupService from './services/backupService.js';
 
 const app = Fastify({
   logger: { level: process.env.LOG_LEVEL || 'info' },
@@ -119,6 +125,7 @@ async function main(): Promise<void> {
   await app.register(readRoutes);
   await app.register(filesRoutes);
   await app.register(summarizeRoutes);
+  await app.register(summarizeStreamRoutes);
   await app.register(progressRoutes);
   await app.register(summaryEditRoutes);
   await app.register(auditRoutes);
@@ -132,6 +139,10 @@ async function main(): Promise<void> {
   await app.register(batchRoutes);
   await app.register(usageRoutes);
   await app.register(adminHealthRoutes);
+  await app.register(tagsRoutes);
+  await app.register(searchRoutes);
+  await app.register(exportRoutes);
+  await app.register(backupRoutes);
 
   // 种子:users 空表时建 admin/管理,密码取 env ADMIN_INITIAL_PASSWORD(默认 admin123)
   seedAdminIfEmpty((msg) => app.log.warn(msg));
@@ -151,6 +162,15 @@ async function main(): Promise<void> {
 
   await app.listen({ port: PORT, host: '0.0.0.0' });
   app.log.info(`backend listening on http://0.0.0.0:${PORT} (llm=${llmStatus()})`);
+
+  // 启动自动备份排程(启动即备份一次 + 每 BACKUP_INTERVAL_HOURS 小时一次)。
+  // 用 try/catch 兜底:排程建立失败绝不可挡服务启动(服务已 listen 成功)。
+  try {
+    backupService.scheduleBackups();
+    app.log.info('[backup] 自动备份排程已启动');
+  } catch (err) {
+    app.log.error({ err }, '[backup] 自动备份排程启动失败(不影响服务运行)');
+  }
 }
 
 main().catch((err) => {

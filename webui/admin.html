@@ -85,6 +85,25 @@
   .err-list .err-row .err-msg { color: var(--red); margin-top: 2px; word-break: break-word; }
 
   .recent-wrap { padding: 0 16px 14px; }
+
+  /* 備份 + 審計:區塊內距與表格 */
+  .sect-hint { padding: 6px 16px 0; font-size: 12.5px; color: var(--text-soft); }
+  .sect-body { padding: 8px 16px 14px; }
+  .sect-body .table-wrap { margin-top: 8px; }
+  .audit-filters {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+    padding: 10px 16px 2px;
+  }
+  .audit-filters label { font-size: 13px; color: var(--text-soft); display: inline-flex; align-items: center; gap: 5px; }
+  .audit-filters select { font-size: 13px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); }
+  .audit-filters .audit-count { font-size: 12px; color: var(--text-faint); margin-left: auto; }
+  td.audit-detail { max-width: 340px; }
+  td.audit-detail .d {
+    display: block; max-width: 340px; color: var(--text-soft); font-size: 12.5px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .mono { font-variant-numeric: tabular-nums; }
+  #backup-tbody a.btn { text-decoration: none; color: var(--text); }
   @media (prefers-color-scheme: dark) {
     .err-list .err-row { background: rgba(220,38,38,.08); border-color: rgba(220,38,38,.3); }
   }
@@ -137,6 +156,55 @@
             <tr><th>時間</th><th>觸發</th><th>模型</th><th>耗時</th><th>結果</th></tr>
           </thead>
           <tbody id="recent-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- 備份管理 -->
+  <section class="card" id="backup-card" hidden>
+    <div class="card-head">
+      <span>💾 備份管理</span>
+      <button type="button" class="btn small primary" id="backup-run-btn">立即備份</button>
+    </div>
+    <div class="sect-hint">每 6 小時自動備份,保留最近 30 份。備份檔存於後端 <span class="mono">backend/backups/</span>。</div>
+    <div class="sect-body">
+      <div id="backup-state"></div>
+      <div class="table-wrap" id="backup-table-wrap" hidden>
+        <table class="list">
+          <thead>
+            <tr><th>檔名</th><th>大小</th><th>時間</th><th style="width:80px;">下載</th></tr>
+          </thead>
+          <tbody id="backup-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- 審計日志(全站) -->
+  <section class="card" id="audit-card" hidden>
+    <div class="card-head">
+      <span>📜 審計日志(全站)</span>
+      <button type="button" class="btn small" id="audit-refresh-btn">⟳ 重新整理</button>
+    </div>
+    <div class="audit-filters">
+      <label>使用者
+        <select id="audit-user"><option value="">全部</option></select>
+      </label>
+      <label>動作
+        <select id="audit-action"><option value="">全部</option></select>
+      </label>
+      <button type="button" class="btn small" id="audit-clear-btn">清空篩選</button>
+      <span class="audit-count" id="audit-count"></span>
+    </div>
+    <div class="sect-body">
+      <div id="audit-state"></div>
+      <div class="table-wrap" id="audit-table-wrap" hidden>
+        <table class="list">
+          <thead>
+            <tr><th style="white-space:nowrap;">時間</th><th>使用者</th><th>動作</th><th>對象</th><th>細節</th></tr>
+          </thead>
+          <tbody id="audit-tbody"></tbody>
         </table>
       </div>
     </div>
@@ -397,9 +465,200 @@
     renderUsage(summary || {}, recent);
   }
 
-  function reloadAll() { loadHealth(); loadUsage(); }
+  // ============ 備份管理 ============
+
+  /** 後端形狀未定,容忍多種欄位命名 → [{name,size,at}] */
+  function normalizeBackups(data) {
+    const arr = firstDefined(data && (data.backups || data.files || data.items || data.list), []) || [];
+    if (!Array.isArray(arr)) return [];
+    return arr.map(function (b) {
+      if (typeof b === 'string') return { name: b, size: undefined, at: undefined };
+      return {
+        name: firstDefined(b.name, b.filename, b.file, ''),
+        size: firstDefined(b.size, b.sizeBytes, b.bytes),
+        at: firstDefined(b.createdAt, b.mtime, b.mtimeMs, b.time, b.at, b.modifiedAt)
+      };
+    }).filter(function (b) { return b.name; });
+  }
+
+  function renderBackups(list) {
+    const tbody = $('backup-tbody');
+    if (!list.length) {
+      $('backup-table-wrap').hidden = true;
+      $('backup-state').innerHTML = UI.emptyHtml('尚無備份檔');
+      return;
+    }
+    $('backup-state').innerHTML = '';
+    tbody.innerHTML = list.map(function (b) {
+      const sizeTxt = (b.size != null) ? (UI.fmtSize(b.size) || (b.size + ' B')) : '—';
+      const atTxt = (b.at != null) ? (UI.relTime(Number(b.at) || b.at)) : '—';
+      const atFull = (b.at != null) ? fmtWhen(b.at) : '';
+      const url = API.backupDownloadUrl(b.name);
+      return '<tr>' +
+        '<td class="mono" style="word-break:break-all;">' + esc(b.name) + '</td>' +
+        '<td class="mono">' + esc(sizeTxt) + '</td>' +
+        '<td title="' + esc(atFull) + '">' + esc(atTxt) + '</td>' +
+        '<td><a class="btn small" href="' + esc(url) + '">下載</a></td>' +
+        '</tr>';
+    }).join('');
+    $('backup-table-wrap').hidden = false;
+  }
+
+  async function loadBackups() {
+    $('backup-state').innerHTML = UI.loadingHtml('載入備份清單…');
+    try {
+      const data = await API.listBackups();
+      renderBackups(normalizeBackups(data));
+    } catch (e) {
+      $('backup-table-wrap').hidden = true;
+      $('backup-state').innerHTML = e.status === 403
+        ? UI.errorHtml('權限不足:僅「管理」角色可檢視備份')
+        : UI.errorHtml('備份清單載入失敗:' + e.message);
+    }
+  }
+
+  async function doRunBackup() {
+    const btn = $('backup-run-btn');
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '備份中…';
+    try {
+      await API.runBackup();
+      await loadBackups();
+      $('backup-state').innerHTML = '<div class="state-box">✅ 備份完成</div>';
+      setTimeout(function () {
+        if ($('backup-state').textContent.indexOf('備份完成') !== -1) loadBackups();
+      }, 2500);
+    } catch (e) {
+      alert(e.status === 403 ? '權限不足:僅「管理」角色可執行備份' : ('備份失敗:' + e.message));
+    } finally {
+      btn.disabled = false;
+      btn.textContent = orig;
+    }
+  }
+
+  // ============ 審計日志(全站) ============
+
+  // 常見動作 → 繁中友善標籤(未知值原樣顯示)
+  const ACTION_LABELS = {
+    stage_task_toggle: '階段任務勾選', stage_meta_edit: '階段參數', stage_override: '手動鎖定階段',
+    order_stage_task_toggle: '訂單任務勾選', order_stage_meta_edit: '訂單階段參數', order_stage_override: '訂單鎖定階段',
+    order_create: '建立訂單', order_update: '編輯訂單', order_delete: '刪除訂單',
+    summary_regenerate: '重生總結', summary_edit: '編輯總結',
+    file_upload: '上傳檔案', file_docrole: '檔案分類',
+    tag_create: '新增標籤', tag_update: '編輯標籤', tag_delete: '刪除標籤', tag_set: '設定客戶標籤',
+    issue_create: '建立問題', issue_update: '更新問題', issue_status: '問題狀態'
+  };
+  function actionLabel(a) { return ACTION_LABELS[a] || String(a || '—'); }
+
+  let allAudit = [];
+
+  /** logs 正規化為 [{when,userName,action,target,detail}] */
+  function normalizeAudit(data) {
+    const arr = firstDefined(data && (data.logs || data.items || data.rows), []) || [];
+    if (!Array.isArray(arr)) return [];
+    return arr.map(function (r) {
+      return {
+        when: firstDefined(r.createdAt, r.at, r.time, r.ts),
+        userName: firstDefined(r.userName, r.user, r.actor) || '系統',
+        action: firstDefined(r.action, r.act, '') || '',
+        target: firstDefined(r.target, r.targetId, ''),
+        detail: firstDefined(r.detail, r.details, r.meta, '')
+      };
+    });
+  }
+
+  /** detail 可能是 JSON 字串或物件 → 精簡單行可讀字串(純文字,呼叫端負責 esc) */
+  function detailText(d) {
+    if (d === null || d === undefined || d === '') return '';
+    const obj = UI.parseMaybeJson(d);
+    if (obj && typeof obj === 'object') {
+      return Object.keys(obj).map(function (k) {
+        let v = obj[k];
+        if (v && typeof v === 'object') v = JSON.stringify(v);
+        return k + '=' + v;
+      }).join(', ');
+    }
+    return String(d);
+  }
+
+  /** 以現有資料填充下拉(保留當前選取值);distinct 排序 */
+  function fillSelect(sel, values, current) {
+    const uniq = Array.from(new Set(values.filter(Boolean))).sort();
+    let html = '<option value="">全部</option>';
+    html += uniq.map(function (v) {
+      const label = sel.id === 'audit-action' ? actionLabel(v) : v;
+      return '<option value="' + esc(v) + '">' + esc(label) + '</option>';
+    }).join('');
+    sel.innerHTML = html;
+    if (current && uniq.indexOf(current) !== -1) sel.value = current;
+  }
+
+  function renderAudit() {
+    const uSel = $('audit-user'), aSel = $('audit-action');
+    const uVal = uSel.value, aVal = aSel.value;
+    const rows = allAudit.filter(function (r) {
+      if (uVal && r.userName !== uVal) return false;
+      if (aVal && r.action !== aVal) return false;
+      return true;
+    }).slice(0, 100);
+
+    const tbody = $('audit-tbody');
+    if (!rows.length) {
+      $('audit-table-wrap').hidden = true;
+      $('audit-state').innerHTML = UI.emptyHtml(allAudit.length ? '沒有符合篩選的紀錄' : '尚無審計紀錄');
+      $('audit-count').textContent = allAudit.length ? ('共 ' + allAudit.length + ' 筆') : '';
+      return;
+    }
+    $('audit-state').innerHTML = '';
+    tbody.innerHTML = rows.map(function (r) {
+      const dt = detailText(r.detail);
+      return '<tr>' +
+        '<td style="white-space:nowrap;" title="' + esc(fmtWhen(r.when)) + '">' + esc(fmtWhen(r.when)) + '</td>' +
+        '<td>' + esc(r.userName) + '</td>' +
+        '<td>' + esc(actionLabel(r.action)) + '</td>' +
+        '<td class="mono" style="word-break:break-all;">' + esc(r.target != null ? String(r.target) : '') + '</td>' +
+        '<td class="audit-detail"><span class="d" title="' + esc(dt) + '">' + esc(dt) + '</span></td>' +
+        '</tr>';
+    }).join('');
+    $('audit-table-wrap').hidden = false;
+    const showing = rows.length;
+    $('audit-count').textContent = (uVal || aVal)
+      ? ('符合 ' + allAudit.filter(function (r) { return (!uVal || r.userName === uVal) && (!aVal || r.action === aVal); }).length + ' 筆(共 ' + allAudit.length + ')')
+      : ('共 ' + allAudit.length + ' 筆' + (allAudit.length > showing ? '(顯示前 ' + showing + ')' : ''));
+  }
+
+  async function loadAudit() {
+    $('audit-state').innerHTML = UI.loadingHtml('載入審計日志…');
+    try {
+      const data = await API.listAudit({ limit: 200 });
+      allAudit = normalizeAudit(data);
+      // 保留當前選取值再重填下拉
+      fillSelect($('audit-user'), allAudit.map(function (r) { return r.userName; }), $('audit-user').value);
+      fillSelect($('audit-action'), allAudit.map(function (r) { return r.action; }), $('audit-action').value);
+      renderAudit();
+    } catch (e) {
+      allAudit = [];
+      $('audit-table-wrap').hidden = true;
+      $('audit-count').textContent = '';
+      $('audit-state').innerHTML = e.status === 403
+        ? UI.errorHtml('權限不足:僅「管理」角色可檢視審計日志')
+        : UI.errorHtml('審計日志載入失敗:' + e.message);
+    }
+  }
+
+  function reloadAll() { loadHealth(); loadUsage(); loadBackups(); loadAudit(); }
 
   $('refresh-btn').addEventListener('click', reloadAll);
+  $('backup-run-btn').addEventListener('click', doRunBackup);
+  $('audit-refresh-btn').addEventListener('click', loadAudit);
+  $('audit-user').addEventListener('change', renderAudit);
+  $('audit-action').addEventListener('change', renderAudit);
+  $('audit-clear-btn').addEventListener('click', function () {
+    $('audit-user').value = '';
+    $('audit-action').value = '';
+    renderAudit();
+  });
 
   // ---- 啟動:先 me(401 由 api.js 統一轉跳 login);非管理員顯示權限不足 ----
   (async function init() {
@@ -416,6 +675,8 @@
     $('page-state').innerHTML = '';
     $('health-card').hidden = false;
     $('usage-card').hidden = false;
+    $('backup-card').hidden = false;
+    $('audit-card').hidden = false;
     reloadAll();
   })();
 })();

@@ -298,6 +298,24 @@ CREATE TABLE IF NOT EXISTS order_stage_meta (
 // summaries 加 orderId(0=整體;>0=某订单),additive 迁移
 tryAlter('ALTER TABLE summaries ADD COLUMN orderId INTEGER DEFAULT 0');
 
+// 客户标签(急件/VIP/负责业务…):共享标签定义 + 客户↔标签多对多
+db.exec(`
+CREATE TABLE IF NOT EXISTS tags (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT UNIQUE NOT NULL,
+  color TEXT,
+  createdAt INTEGER
+);
+CREATE TABLE IF NOT EXISTS customer_tags (
+  lineChatId TEXT NOT NULL,
+  tagId INTEGER NOT NULL,
+  createdAt INTEGER,
+  UNIQUE (lineChatId, tagId)
+);
+CREATE INDEX IF NOT EXISTS idx_customer_tags_tag ON customer_tags (tagId);
+CREATE INDEX IF NOT EXISTS idx_customer_tags_chat ON customer_tags (lineChatId);
+`);
+
 // LLM 用量追踪:每次总结呼叫记一笔,供管理员看成本/耗时/成功率
 db.exec(`
 CREATE TABLE IF NOT EXISTS llm_usage (

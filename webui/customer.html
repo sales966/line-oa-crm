@@ -67,6 +67,46 @@
 .order-modal-field input { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; }
 .order-modal-row { display: flex; gap: 10px; }
 .order-modal-row .order-modal-field { flex: 1; }
+
+/* 串流總結預覽:生成中即時增長的文字 + 閃爍游標 */
+.stream-live { font-size: 12px; font-weight: 700; color: var(--primary); }
+.summary-text.stream-preview { min-height: 1.4em; }
+.summary-text.stream-preview.streaming::after {
+  content: '▋'; display: inline-block; margin-left: 1px; color: var(--primary);
+  animation: streamblink 1s steps(1) infinite;
+}
+@keyframes streamblink { 50% { opacity: 0; } }
+
+/* ===== 列印 / PDF:平時隱藏,列印時只顯示 #print-root ===== */
+#print-root { display: none; }
+@media print {
+  body > *:not(#print-root) { display: none !important; }
+  #print-root { display: block !important; color: #000; font-size: 12pt; line-height: 1.5; }
+  #print-root * { color: #000 !important; }
+  .pv-title { font-size: 20pt; font-weight: 800; margin: 0 0 2px; }
+  .pv-meta { font-size: 10pt; color: #444 !important; margin-bottom: 14px; }
+  .pv-section { margin: 0 0 16px; break-inside: avoid; }
+  .pv-section > h2 { font-size: 13pt; font-weight: 800; margin: 0 0 6px; padding-bottom: 3px; border-bottom: 2px solid #000; }
+  .pv-kv { margin: 2px 0; }
+  .pv-kv b { display: inline-block; min-width: 84px; }
+  .pv-muted { color: #666 !important; }
+  .pv-summary { white-space: pre-wrap; word-break: break-word; }
+  .pv-stage { margin: 4px 0 8px; break-inside: avoid; }
+  .pv-stage-h { font-weight: 700; margin-bottom: 2px; }
+  .pv-count { font-weight: 400; color: #555 !important; }
+  .pv-tasks { list-style: none; margin: 0; padding: 0 0 0 4px; }
+  .pv-tasks li { margin: 1px 0; }
+  .pv-list { margin: 0; padding-left: 18px; }
+  .pv-list li { margin: 2px 0; }
+  #print-root .kv-table { border-collapse: collapse; margin: 4px 0; width: 100%; }
+  #print-root .kv-table th, #print-root .kv-table td { border: 1px solid #999; padding: 3px 8px; text-align: left; font-size: 11pt; }
+  #print-root .kv-table th { width: 32%; background: #f0f0f0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  #print-root .section-title { font-weight: 700; margin: 8px 0 3px; }
+  #print-root .action-group { margin: 3px 0; }
+  #print-root .action-group .role { font-weight: 700; }
+  #print-root .action-group ul { margin: 2px 0; padding-left: 18px; }
+  @page { margin: 14mm; }
+}
 </style>
 </head>
 <body>
@@ -150,7 +190,10 @@
       <section class="card">
         <div class="card-head">
           <span>AI 總結</span>
-          <button class="btn small primary" id="regen-btn">重新生成總結</button>
+          <span class="card-head-actions" style="display:flex;gap:6px;">
+            <button type="button" class="btn small" id="print-btn" title="列印或另存為 PDF">🖨 列印 / PDF</button>
+            <button class="btn small primary" id="regen-btn">重新生成總結</button>
+          </span>
         </div>
         <div id="summary-deadline"></div>
         <div class="card-body" id="summary-body"></div>
@@ -179,6 +222,9 @@
 
   </div>
 </main>
+
+<!-- 列印 / PDF 專用視圖(平時隱藏;按「🖨 列印 / PDF」時填入內容並 window.print()) -->
+<div id="print-root" aria-hidden="true"></div>
 
 <script src="api.js"></script>
 <script>
@@ -641,7 +687,7 @@
     box.innerHTML = listHtml;
   }
 
-  // 重新生成總結
+  // 重新生成總結(優先串流 SSE;串流不支援/失敗一律自動退回既有非串流 POST,行為與現行一致)
   $('regen-btn').addEventListener('click', async function () {
     const btn = this;
     btn.disabled = true;
@@ -655,31 +701,152 @@
     }, 1000);
     const errBox = () => $('summarize-err');
     if (errBox()) errBox().textContent = '';
-    try {
-      // 已有總結時(按鈕文案「重新生成總結」)必須帶 force=1:
-      // 依契約緩存規則,coveredUntilTs >= 最新訊息 timestamp 時後端直接回 cached,
-      // 不帶 force 等於點了沒點(尤其建檔回填更舊歷史後,舊總結會永久卡死)。
-      // 「產生總結」(從無總結)維持不帶 force,讓緩存規則自然放行。
-      const data = await API.summarizeFor(chatId, currentOrderId, hasSummary);
-      if (data && data.summary) {
-        renderSummary(data.summary);
-      } else {
-        await loadSummary();
+
+    // 已有總結時(按鈕文案「重新生成總結」)必須帶 force=1;首次「產生總結」不帶(與現行一致)。
+    const useForce = hasSummary;
+    const box = $('summary-body');
+    const prevBodyHtml = box.innerHTML; // 串流失敗時原樣還原,再走既有非串流路徑(絕不比現在差)
+
+    // 既有非串流路徑:與上線版一字不差(串流不支援/失敗時退回)
+    async function runNonStream() {
+      try {
+        // 依契約緩存規則,已有總結不帶 force 會直接回 cached(等於沒點);故帶 force=1。
+        const data = await API.summarizeFor(chatId, currentOrderId, useForce);
+        if (data && data.summary) {
+          renderSummary(data.summary);
+        } else {
+          await loadSummary();
+        }
+        loadCustomer();  // 階段可能被更新
+        loadProgress();  // 生成總結會依 LLM 判定更新 stage_tasks 紅綠燈 → 重新載入進度面板
+      } catch (e) {
+        const msg = e.status === 503
+          ? 'LLM 未設定,請在 backend/.env 填入 OPENAI_API_KEY'
+          : '生成失敗:' + e.message;
+        if (errBox()) errBox().textContent = msg;
+        else alert(msg);
       }
+    }
+
+    // 串流預覽區:文字持續增長 + 游標閃爍(不動按鈕倒數;done 前不呼叫 renderSummary)
+    let streamed = '';
+    let previewShown = false;
+    function showPreview() {
+      box.innerHTML =
+        '<div class="summary-badge-row"><span class="stream-live">✨ 生成中(串流)…</span></div>' +
+        '<div class="summary-text stream-preview streaming" id="stream-preview-text"></div>' +
+        '<div class="summarize-err" id="summarize-err"></div>';
+      previewShown = true;
+    }
+    function onDelta(textChunk) {
+      if (!previewShown) showPreview();
+      // 後端每次 delta 送的是「累積快照」(從頭到目前的完整 summaryText),非增量片段 →
+      // 必須 REPLACE 覆蓋,不可 += 累加(累加會把每次完整快照疊在前一份完整快照上 → 重複亂碼)。
+      streamed = textChunk;
+      const el = $('stream-preview-text');
+      if (el) el.textContent = streamed; // XSS 安全:純文字寫入
+    }
+
+    try {
+      // done 回傳的 summary 走既有 renderSummary(燈號/死線/檔案角色渲染照舊,與非串流成功一模一樣)
+      const summary = await API.summarizeStream(chatId, {
+        force: useForce,
+        orderId: currentOrderId,
+        onDelta: onDelta
+      });
+      renderSummary(summary);
       loadCustomer();  // 階段可能被更新
-      loadProgress();  // 生成總結會依 LLM 判定更新 stage_tasks 紅綠燈 → 重新載入進度面板
+      loadProgress();  // 依 LLM 判定更新紅綠燈 → 重新載入進度面板
     } catch (e) {
-      const msg = e.status === 503
-        ? 'LLM 未設定,請在 backend/.env 填入 OPENAI_API_KEY'
-        : '生成失敗:' + e.message;
-      if (errBox()) errBox().textContent = msg;
-      else alert(msg);
+      // 串流任何失敗(不支援 / 網路斷 / 非 2xx / SSE 錯 / 未收到 done):
+      // 還原畫面後退回既有非串流 POST,保證「串流壞了也絕不比現在差」。
+      box.innerHTML = prevBodyHtml;
+      await runNonStream();
     } finally {
       clearInterval(tick);
       btn.disabled = false;
       // 成功時 renderSummary 已更新按鈕文字;若仍停在「生成中…」(失敗路徑)則還原
       if (btn.textContent.indexOf('生成中') !== -1) btn.textContent = orig;
     }
+  });
+
+  // ---- 列印 / PDF:組列印友善視圖(客戶名/階段/死線/總結重點/進度燈號/訂單)→ window.print() ----
+  function buildPrintView() {
+    const name = custName || ($('page-title') ? $('page-title').textContent : '') || '客戶';
+    const p = progressData || {};
+    const stage = p.currentStage || '—';
+
+    // 目前檢視範圍(整體 / 某訂單)
+    let scopeLabel = '整體';
+    if (currentOrderId !== 0) {
+      const o = findOrder(currentOrderId);
+      scopeLabel = o ? orderTabTitle(o) : ('訂單 #' + currentOrderId);
+    }
+
+    // 大貨死線
+    let dlHtml = '<span class="pv-muted">尚未設定</span>';
+    const d = p.deadline || {};
+    if (d.at) {
+      const dl = d.daysLeft;
+      let tag = '';
+      if (dl < 0) tag = '(已逾期 ' + Math.abs(dl) + ' 天)';
+      else if (dl === 0) tag = '(今天到期)';
+      else tag = '(剩 ' + dl + ' 天)';
+      dlHtml = UI.esc(UI.fmtDate(d.at)) + ' ' + UI.esc(tag) +
+        (d.source === 'manual' ? ' · 人工設定' : ' · AI 推算') +
+        (d.evidence ? '<div class="pv-kv pv-muted">依據:' + UI.esc(d.evidence) + '</div>' : '');
+    }
+
+    // 總結重點(沿用既有顯示文字 + 結構化欄位渲染,皆已 escape)
+    let summaryHtml = '<div class="pv-muted">尚無總結</div>';
+    if (currentSummary) {
+      summaryHtml = '<div class="pv-summary">' +
+        UI.esc(summaryDisplayText(currentSummary) || '(無內容)') + '</div>' +
+        renderSummaryFacts(currentSummary);
+    }
+
+    // 進度燈號(逐階段任務紅綠燈)
+    const stages = (p.stages && p.stages.length) ? p.stages : [];
+    let progressHtml = stages.length ? stages.map(function (st) {
+      const tasks = st.tasks || [];
+      const doneN = tasks.filter(function (t) { return t.done; }).length;
+      const rows = tasks.length
+        ? tasks.map(function (t) {
+            return '<li>' + (t.done ? '🟢' : '🔴') + ' ' + UI.esc(t.label) + '</li>';
+          }).join('')
+        : '<li class="pv-muted">此階段無任務</li>';
+      return '<div class="pv-stage"><div class="pv-stage-h">' + UI.esc(st.stage) +
+        ' <span class="pv-count">' + doneN + '/' + tasks.length + '</span></div>' +
+        '<ul class="pv-tasks">' + rows + '</ul></div>';
+    }).join('') : '<div class="pv-muted">尚無進度資料</div>';
+
+    // 訂單清單
+    let ordersHtml = (ordersList && ordersList.length)
+      ? '<ul class="pv-list">' + ordersList.map(function (o) {
+          const range = orderRangeLabel(o);
+          return '<li>' + UI.esc(orderTabTitle(o)) + (range ? ' · ' + UI.esc(range) : '') + '</li>';
+        }).join('') + '</ul>'
+      : '<div class="pv-muted">尚無訂單</div>';
+
+    const u = (typeof API.getUser === 'function' && API.getUser()) || null;
+    const meta = '列印時間 ' + UI.esc(UI.fmtDateTime(Date.now())) +
+      (u ? ' · 列印者 ' + UI.esc(u.name || '') : '') +
+      ' · 檢視範圍:' + UI.esc(scopeLabel);
+
+    return '<div class="pv-title">' + UI.esc(name) + '</div>' +
+      '<div class="pv-meta">' + meta + '</div>' +
+      '<div class="pv-section"><div class="pv-kv"><b>目前階段</b>' + UI.esc(UI.stageLabel(stage)) + '</div>' +
+      '<div class="pv-kv"><b>大貨死線</b>' + dlHtml + '</div></div>' +
+      '<div class="pv-section"><h2>總結重點</h2>' + summaryHtml + '</div>' +
+      '<div class="pv-section"><h2>進度燈號</h2>' + progressHtml + '</div>' +
+      '<div class="pv-section"><h2>訂單</h2>' + ordersHtml + '</div>';
+  }
+
+  $('print-btn').addEventListener('click', function () {
+    const root = $('print-root');
+    if (!root) return;
+    root.innerHTML = buildPrintView();
+    window.print();
   });
 
   // ================= 右欄:檔案牆(兩區:LINE 下載 / 工作台上傳 · 分類 · docRole · 縮圖燈箱) =================

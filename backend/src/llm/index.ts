@@ -45,12 +45,18 @@ export interface SummaryOutput {
   fileRoles: FileRole[];
 }
 
+/** summarize 可选参数:onDelta 为串流渐进回呼(不传则走非串流路径,行为不变) */
+export interface SummarizeOptions {
+  /** 每次串流增量后,回呼当前已抽取的 summaryText 部分文字(仅用于 UI 渐进显示,不影响最终解析) */
+  onDelta?: (partialSummaryText: string) => void;
+}
+
 export interface LlmProvider {
   /** 'openai' | 'claude' */
   readonly name: string;
   readonly model: string;
-  /** 输入 system + user prompt,返回结构化 JSON 结果 */
-  summarize(systemPrompt: string, userPrompt: string): Promise<SummaryOutput>;
+  /** 输入 system + user prompt,返回结构化 JSON 结果;opts 可选,不传时行为与非串流一致 */
+  summarize(systemPrompt: string, userPrompt: string, opts?: SummarizeOptions): Promise<SummaryOutput>;
 }
 
 /** 旧枚举 / 简体变体 → 契约五阶段字面值 的阶段归一化 */

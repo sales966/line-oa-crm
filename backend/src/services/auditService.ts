@@ -62,3 +62,73 @@ export function listAudit(lineChatId: string, limit = 200): AuditRow[] {
   const lim = Math.min(Math.max(Math.trunc(limit) || 200, 1), 1000);
   return listAuditStmt.all(lineChatId, lim) as AuditRow[];
 }
+
+export interface AllAuditFilter {
+  limit?: number;
+  userId?: number | null;
+  action?: string | null;
+  chatId?: string | null;
+}
+
+export interface AllAuditRow {
+  id: number;
+  userName: string | null;
+  userId: number | null;
+  action: string;
+  target: string | null;
+  detail: string | null;
+  lineChatId: string | null;
+  createdAt: number | null;
+}
+
+/**
+ * 跨全部客户查 audit_log,支持可选筛选(userId / action / chatId),createdAt 倒序。
+ * 全部参数化,limit 夹在 1..1000。
+ */
+export function listAllAudit(filter: AllAuditFilter = {}): AllAuditRow[] {
+  const lim = Math.min(Math.max(Math.trunc(filter.limit ?? 100) || 100, 1), 1000);
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+
+  if (filter.userId !== undefined && filter.userId !== null && Number.isFinite(filter.userId)) {
+    clauses.push('userId = ?');
+    params.push(Math.trunc(filter.userId));
+  }
+  if (typeof filter.action === 'string' && filter.action.trim()) {
+    clauses.push('action = ?');
+    params.push(filter.action.trim());
+  }
+  if (typeof filter.chatId === 'string' && filter.chatId.trim()) {
+    clauses.push('lineChatId = ?');
+    params.push(filter.chatId.trim());
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+  const sql =
+    `SELECT id, userName, userId, action, target, detail, lineChatId, createdAt ` +
+    `FROM audit_log ${where} ORDER BY createdAt DESC, id DESC LIMIT ?`;
+  params.push(lim);
+  return db.prepare(sql).all(...params) as AllAuditRow[];
+}
+
+/** distinct action 清单(供前端筛选下拉),按字母排序 */
+export function listAuditActions(): string[] {
+  const rows = db
+    .prepare(
+      "SELECT DISTINCT action FROM audit_log WHERE action IS NOT NULL AND action <> '' ORDER BY action ASC"
+    )
+    .all() as { action: string }[];
+  return rows.map((r) => r.action);
+}
+
+/** 有纪录的 user 清单(供前端筛选下拉),回 {userId, userName} */
+export function listAuditUsers(): { userId: number | null; userName: string | null }[] {
+  return db
+    .prepare(
+      `SELECT userId, userName FROM audit_log
+       WHERE userId IS NOT NULL OR userName IS NOT NULL
+       GROUP BY userId, userName
+       ORDER BY userName ASC`
+    )
+    .all() as { userId: number | null; userName: string | null }[];
+}

@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>階段看板 — LINE OA 客戶進度中樞</title>
+<link rel="stylesheet" href="app.css">
+<style>
+  .kan-hint {
+    font-size: 13px; color: var(--text-soft); margin-bottom: 14px;
+    background: var(--primary-soft); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 12px; line-height: 1.5;
+  }
+  .kan-board {
+    display: flex; gap: 12px; align-items: flex-start;
+    overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 10px;
+  }
+  .kan-col {
+    flex: 1 0 230px; min-width: 230px; max-width: 360px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    display: flex; flex-direction: column;
+  }
+  .kan-col-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 14px; border-bottom: 1px solid var(--border);
+  }
+  .kan-count { margin-left: auto; font-weight: 700; color: var(--text-soft); font-size: 14px; }
+  .kan-col-body {
+    padding: 10px; display: flex; flex-direction: column; gap: 10px;
+    min-height: 90px; flex: 1;
+  }
+  .kan-col-body.drag-over {
+    background: var(--primary-soft);
+    outline: 2px dashed var(--primary); outline-offset: -5px; border-radius: 8px;
+  }
+  .kan-card {
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 12px; cursor: pointer; background: var(--card);
+    transition: border-color .12s, box-shadow .12s;
+  }
+  .kan-card:hover { border-color: var(--primary); box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+  .kan-card.dragging { opacity: .45; }
+  .kan-card-top { display: flex; align-items: flex-start; gap: 8px; }
+  .kan-name { font-weight: 600; font-size: 14px; flex: 1; min-width: 0; word-break: break-word; }
+  .kan-auto {
+    flex: none; font-size: 11px; padding: 2px 8px; line-height: 1.4;
+    border: 1px solid var(--border); border-radius: 999px; background: none;
+    cursor: pointer; color: var(--text-soft); white-space: nowrap;
+  }
+  .kan-auto:hover { background: var(--primary-soft); color: var(--text); border-color: var(--primary); }
+  .kan-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .kan-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
+  .kan-pending {
+    font-size: 12px; font-weight: 700; color: var(--red);
+    background: #fde8e8; padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+  }
+  .kan-empty {
+    color: var(--text-faint); font-size: 12.5px; text-align: center;
+    padding: 20px 6px; border: 1px dashed var(--border); border-radius: 8px;
+  }
+
+  /* 標籤 chips / 大貨死線徽章(與 index.html 內聯樣式一致,因不在 app.css) */
+  .tag-chip {
+    display: inline-flex; align-items: center; font-size: 11px; font-weight: 600;
+    line-height: 1; padding: 2px 7px; border-radius: 999px; white-space: nowrap;
+  }
+  .badge.dl { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+  .badge.dl.dl-overdue { background: #fde8e8; color: var(--red); }
+  .badge.dl.dl-soon { background: #fef3c7; color: #b45309; }
+  .badge.dl.dl-ok { background: #e7f6ec; color: #1a7f37; }
+
+  @media (max-width: 640px) {
+    .kan-col { flex: 0 0 78vw; min-width: 78vw; max-width: 78vw; }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="back" href="index.html">← 返回客戶列表</a>
+  <h1>▦ 階段看板</h1>
+  <span class="sub" id="board-sub">載入中…</span>
+</header>
+
+<main class="page">
+  <p class="kan-hint">拖曳卡片可人工釘選階段(覆蓋 AI 判斷);按 ↺ 恢復自動。點卡片進入客戶詳情。</p>
+  <div id="board-state"></div>
+  <div class="kan-board" id="board" hidden></div>
+</main>
+
+<script src="api.js"></script>
+<script>
+'use strict';
+(function () {
+  const STAGES = ['洽談', '已回簽', '已打樣', '已出廠', '已交付', '流失'];
+  const board = document.getElementById('board');
+  const boardState = document.getElementById('board-state');
+  const sub = document.getElementById('board-sub');
+
+  let customers = [];       // 記憶體狀態(供樂觀更新 / 回滾)
+  let dragChatId = null;    // 目前拖曳中的 chatId
+  let justDragged = false;  // 剛拖放完 → 抑制隨後的 click 導頁
+  let reqSeq = 0;           // 防競態(自動刷新)
+
+  function cid(c) { return c.lineChatId || c.chatId || ''; }
+
+  // 客戶所屬欄:以繁體階段名歸類;未知階段兜底到「洽談」(後端寫入為正規繁體,罕見)
+  function stageOf(c) {
+    const s = UI.stageLabel(c.currentStage);
+    return STAGES.indexOf(s) !== -1 ? s : '洽談';
+  }
+
+  function cardHtml(c) {
+    const chatId = cid(c);
+    const name = c.lineName || '(未命名)';
+    const chips = (Array.isArray(c.tags) ? c.tags : []).map(UI.tagChipHtml).join('');
+    const dl = UI.deadlineBadge(c.deadlineAt, c.deadlineDaysLeft); // 無死線回 ''
+    const pending = c.followedUp ? '<span class="kan-pending">🔴 待處理</span>' : '';
+    const tags = chips ? '<div class="kan-tags">' + chips + '</div>' : '';
+    const meta = (dl || pending) ? '<div class="kan-meta">' + dl + pending + '</div>' : '';
+    return '<div class="kan-card" draggable="true" data-chatid="' + UI.esc(chatId) + '">' +
+      '<div class="kan-card-top">' +
+        '<span class="kan-name">' + UI.esc(name) + '</span>' +
+        '<button type="button" class="kan-auto" data-chatid="' + UI.esc(chatId) +
+          '" title="恢復自動判定階段(清除人工釘選)">↺ 自動</button>' +
+      '</div>' + tags + meta +
+    '</div>';
+  }
+
+  function render() {
+    const byStage = {};
+    STAGES.forEach(function (s) { byStage[s] = []; });
+    customers.forEach(function (c) { byStage[stageOf(c)].push(c); });
+    board.innerHTML = STAGES.map(function (s) {
+      const list = byStage[s];
+      const cards = list.length
+        ? list.map(cardHtml).join('')
+        : '<div class="kan-empty">此階段暫無客戶</div>';
+      return '<section class="kan-col">' +
+        '<header class="kan-col-head">' + UI.stageBadge(s) +
+          '<span class="kan-count">' + list.length + '</span></header>' +
+        '<div class="kan-col-body" data-stage="' + UI.esc(s) + '">' + cards + '</div>' +
+      '</section>';
+    }).join('');
+    board.hidden = false;
+  }
+
+  // ---- 載入 / 刷新 ----
+  async function load(silent) {
+    silent = silent === true;
+    const seq = ++reqSeq;
+    if (!silent) boardState.innerHTML = UI.loadingHtml('載入看板…');
+    let data;
+    try {
+      data = await API.getCustomers();
+    } catch (e) {
+      if (seq !== reqSeq) return;
+      if (!silent) { boardState.innerHTML = UI.errorHtml('載入失敗:' + e.message); board.hidden = true; }
+      return;
+    }
+    if (seq !== reqSeq) return;
+    customers = (data && data.customers) || [];
+    sub.textContent = '共 ' + customers.length + ' 位客戶';
+    if (customers.length === 0) {
+      boardState.innerHTML = UI.emptyHtml('尚無客戶資料,請先透過同步插件匯入 LINE 對話');
+      board.hidden = true;
+      return;
+    }
+    boardState.innerHTML = '';
+    render();
+  }
+
+  // ---- 拖曳:設定 / 清除人工釘選階段 ----
+  async function moveCard(chatId, targetStage) {
+    const c = customers.find(function (x) { return cid(x) === chatId; });
+    if (!c || STAGES.indexOf(targetStage) === -1) return;
+    const oldStage = stageOf(c);
+    if (oldStage === targetStage) return; // 同欄不動作
+    c.currentStage = targetStage; // 樂觀更新
+    render();
+    try {
+      await API.setStageOverride(chatId, targetStage); // 人工釘選(覆蓋 AI)
+    } catch (e) {
+      c.currentStage = oldStage; // 失敗回滾
+      render();
+      alert('移動失敗:' + e.message);
+      return;
+    }
+    load(true); // 成功 → 靜默重載對賬(計數 / 階段)
+  }
+
+  async function clearOverride(chatId) {
+    try {
+      await API.setStageOverride(chatId, null); // 清除釘選 → 回自動判定
+    } catch (e) {
+      alert('恢復自動失敗:' + e.message);
+      return;
+    }
+    load(true); // 階段可能被 AI 重算,重載反映
+  }
+
+  // ---- 事件:拖曳 ----
+  board.addEventListener('dragstart', function (e) {
+    const card = e.target.closest && e.target.closest('.kan-card');
+    if (!card) return;
+    dragChatId = card.dataset.chatid || '';
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', dragChatId); } catch (_) { /* 舊瀏覽器容錯 */ }
+    }
+    card.classList.add('dragging');
+  });
+
+  board.addEventListener('dragend', function (e) {
+    const card = e.target.closest && e.target.closest('.kan-card');
+    if (card) card.classList.remove('dragging');
+    Array.prototype.forEach.call(board.querySelectorAll('.kan-col-body.drag-over'), function (b) {
+      b.classList.remove('drag-over');
+    });
+    dragChatId = null;
+    justDragged = true; // 抑制隨後的 click 導頁
+    setTimeout(function () { justDragged = false; }, 100);
+  });
+
+  board.addEventListener('dragover', function (e) {
+    const body = e.target.closest && e.target.closest('.kan-col-body');
+    if (!body) return;
+    e.preventDefault(); // 允許放下
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+  });
+
+  board.addEventListener('dragenter', function (e) {
+    const body = e.target.closest && e.target.closest('.kan-col-body');
+    if (body) body.classList.add('drag-over');
+  });
+
+  board.addEventListener('dragleave', function (e) {
+    const body = e.target.closest && e.target.closest('.kan-col-body');
+    if (!body) return;
+    // 僅在真正離開該欄(而非移入其子元素)時移除高亮
+    if (!body.contains(e.relatedTarget)) body.classList.remove('drag-over');
+  });
+
+  board.addEventListener('drop', function (e) {
+    const body = e.target.closest && e.target.closest('.kan-col-body');
+    if (!body) return;
+    e.preventDefault();
+    body.classList.remove('drag-over');
+    let chatId = dragChatId;
+    if (!chatId && e.dataTransfer) { try { chatId = e.dataTransfer.getData('text/plain'); } catch (_) { chatId = ''; } }
+    const targetStage = body.dataset.stage || '';
+    if (chatId && targetStage) moveCard(chatId, targetStage);
+  });
+
+  // ---- 事件:點擊(↺ 自動 / 進客戶詳情) ----
+  board.addEventListener('click', function (e) {
+    const autoBtn = e.target.closest('.kan-auto');
+    if (autoBtn) {
+      e.stopPropagation();
+      if (autoBtn.dataset.chatid) clearOverride(autoBtn.dataset.chatid);
+      return;
+    }
+    if (justDragged) return; // 剛拖放,不當作點擊
+    const card = e.target.closest('.kan-card');
+    if (card && card.dataset.chatid) {
+      location.href = 'customer.html?chatId=' + encodeURIComponent(card.dataset.chatid);
+    }
+  });
+
+  // ---- 啟動 + 24x7 自動刷新(隱藏分頁暫停,回前景補刷) ----
+  (async function start() {
+    const me = await UI.initAuth();
+    if (!me) { sub.textContent = '未登入或無法連線到後端服務'; return; }
+    load();
+    setInterval(function () {
+      if (document.visibilityState === 'hidden') return;
+      load(true);
+    }, 60000);
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') load(true);
+    });
+  })();
+})();
+</script>
+</body>
+</html>

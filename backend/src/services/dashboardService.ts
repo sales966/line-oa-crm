@@ -57,17 +57,19 @@ export function stats(): DashboardStats {
 }
 
 // ── reminders ──────────────────────────────────────────────────────────────
-export type ReminderKind = 'deadline' | 'sample' | 'production';
+// deadline/sample/production:有明确到期时间的既有三类。
+// pending-build:sync_requests 待建档的客户。no-summary:有对话但从未生成过总结的客户。
+export type ReminderKind = 'deadline' | 'sample' | 'production' | 'pending-build' | 'no-summary';
 
 export interface Reminder {
   lineChatId: string;
   customerName: string | null;
   currentStage: string;
   kind: ReminderKind;
-  /** 到期时间(epoch ms) */
-  dueAt: number;
-  /** 以「当天 00:00」为基准的整数天数差:今天=0、未来>0、逾期<0 */
-  daysLeft: number;
+  /** 到期时间(epoch ms);pending-build / no-summary 无明确到期日为 null */
+  dueAt: number | null;
+  /** 以「当天 00:00」为基准的整数天数差:今天=0、未来>0、逾期<0;无到期日为 null */
+  daysLeft: number | null;
   /** 提醒说明(含证据/日期) */
   note: string;
 }
@@ -102,6 +104,23 @@ const doneTasksStmt = db.prepare(
   `SELECT lineChatId, taskKey FROM stage_tasks
    WHERE done = 1 AND taskKey IN ('sample_sent','sample_confirmed','ship_notify','customer_received')`
 );
+
+// pending-build:sync_requests 待建档(status='pending')。客户档可能尚未建立,故 LEFT JOIN 取名/阶段。
+const pendingBuildStmt = db.prepare(`
+  SELECT sr.lineChatId AS lineChatId, c.lineName AS lineName, c.currentStage AS currentStage
+  FROM sync_requests sr
+  LEFT JOIN customers c ON c.lineChatId = sr.lineChatId
+  WHERE sr.status = 'pending'
+`);
+
+// no-summary:有讯息(对话)但 summaries 表从未有过任何一条总结,且非「流失」的客户。
+const noSummaryStmt = db.prepare(`
+  SELECT c.lineChatId AS lineChatId, c.lineName AS lineName, c.currentStage AS currentStage
+  FROM customers c
+  WHERE (c.currentStage IS NULL OR c.currentStage != '流失')
+    AND EXISTS (SELECT 1 FROM messages m WHERE m.lineChatId = c.lineChatId)
+    AND NOT EXISTS (SELECT 1 FROM summaries s WHERE s.lineChatId = c.lineChatId)
+`);
 
 /** 以「当天 00:00」为基准算整数天数差(与 progressService.buildDeadline 一致) */
 function daysLeftFrom(at: number): number {
@@ -216,7 +235,61 @@ export function reminders(): Reminder[] {
     }
   }
 
-  // 按急迫度:daysLeft 升序(逾期最多/最急在前),同值以 dueAt 升序稳定
-  out.sort((a, b) => a.daysLeft - b.daysLeft || a.dueAt - b.dueAt);
+  // pending-build:待建档客户。查询失败不影响既有提醒。
+  try {
+    for (const r of pendingBuildStmt.all() as {
+      lineChatId: string;
+      lineName: string | null;
+      currentStage: string | null;
+    }[]) {
+      const stage =
+        typeof r.currentStage === 'string' && r.currentStage.trim() ? r.currentStage.trim() : '洽談';
+      out.push({
+        lineChatId: r.lineChatId,
+        customerName: r.lineName,
+        currentStage: stage,
+        kind: 'pending-build',
+        dueAt: null,
+        daysLeft: null,
+        note: '待建檔:客戶已請求同步,尚未建立進度檔案',
+      });
+    }
+  } catch {
+    /* 忽略:不让待建档查询影响既有提醒 */
+  }
+
+  // no-summary:有对话但从未生成总结的客户(排除流失)。查询失败不影响既有提醒。
+  try {
+    for (const r of noSummaryStmt.all() as {
+      lineChatId: string;
+      lineName: string | null;
+      currentStage: string | null;
+    }[]) {
+      const stage =
+        typeof r.currentStage === 'string' && r.currentStage.trim() ? r.currentStage.trim() : '洽談';
+      out.push({
+        lineChatId: r.lineChatId,
+        customerName: r.lineName,
+        currentStage: stage,
+        kind: 'no-summary',
+        dueAt: null,
+        daysLeft: null,
+        note: '尚未生成總結:已有對話紀錄但未產生任何 AI 總結',
+      });
+    }
+  } catch {
+    /* 忽略:不让未总结查询影响既有提醒 */
+  }
+
+  // 排序:有明确 dueAt 的按既有急迫度(daysLeft 升序,逾期最多/最急在前,同值以 dueAt 升序稳定);
+  // 无 dueAt 的新类(pending-build / no-summary)一律排在其后,彼此保持插入顺序稳定。
+  out.sort((a, b) => {
+    const aHas = a.dueAt != null && a.daysLeft != null;
+    const bHas = b.dueAt != null && b.daysLeft != null;
+    if (aHas && bHas) return a.daysLeft! - b.daysLeft! || a.dueAt! - b.dueAt!;
+    if (aHas) return -1;
+    if (bHas) return 1;
+    return 0;
+  });
   return out;
 }

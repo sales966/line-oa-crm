@@ -52,9 +52,22 @@
   .rem-days.overdue { background: #fde8e8; color: var(--red); }
   .rem-days.soon { background: #fef3c7; color: #b45309; }
   .rem-empty { color: var(--text-faint); font-size: 13px; padding: 6px 2px; }
+  /* 待辦提醒的「種類」標籤(待建檔 / 待生成總結 / 未知種類預設圖示) */
+  .rem-kind {
+    font-size: 12px; font-weight: 600; color: var(--text-soft);
+    white-space: nowrap; flex: none;
+  }
   @media (max-width: 560px) {
     .rem-note { display: none; }
   }
+
+  /* 頂欄「看板」入口 */
+  .topbar .nav-link {
+    font-size: 13px; font-weight: 600; white-space: nowrap;
+    padding: 4px 12px; border: 1px solid var(--border); border-radius: 999px;
+    color: var(--text); text-decoration: none;
+  }
+  .topbar .nav-link:hover { background: var(--primary-soft); border-color: var(--primary); }
 
   /* 快速篩選 chips + 排序下拉 + 批次建檔工具列(僅 index.html 用,內聯以免動到 app.css) */
   .quick-filters { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -79,6 +92,57 @@
   .badge.dl.dl-overdue { background: #fde8e8; color: var(--red); }
   .badge.dl.dl-soon { background: #fef3c7; color: #b45309; }
   .badge.dl.dl-ok { background: #e7f6ec; color: #1a7f37; }
+
+  /* ---- 客戶標籤 chips / 篩選 / 全站搜尋 / 標籤管理(僅 index.html 用,內聯以免動到 app.css) ---- */
+  .tag-chip {
+    display: inline-flex; align-items: center; font-size: 11px; font-weight: 600;
+    line-height: 1; padding: 2px 7px; border-radius: 999px; white-space: nowrap;
+  }
+  .cust-name-wrap { display: flex; flex-direction: column; gap: 3px; }
+  .cust-name-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+  .row-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+  .tag-edit-btn {
+    font-size: 11px; padding: 1px 7px; border: 1px solid var(--border); border-radius: 999px;
+    background: none; cursor: pointer; color: var(--text-soft); line-height: 1.4; white-space: nowrap;
+  }
+  .tag-edit-btn:hover { background: var(--primary-soft); color: var(--text); }
+
+  /* 標籤篩選列 */
+  .tag-filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .tag-filters .tf-label { font-size: 12.5px; color: var(--text-faint); margin-right: 2px; }
+  .tf-chip {
+    display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border);
+    border-radius: 999px; padding: 3px 10px; cursor: pointer; font: inherit; font-size: 12.5px;
+    background: none; color: var(--text-soft); line-height: 1; white-space: nowrap;
+  }
+  .tf-chip:hover { background: var(--primary-soft); }
+  .tf-chip.active { border-color: var(--primary); background: var(--primary-soft); color: var(--text); font-weight: 700; }
+  .tf-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+
+  /* 全站搜尋結果面板 */
+  .gsearch-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .gs-item {
+    display: block; width: 100%; text-align: left; background: none; border: 0;
+    border-top: 1px solid var(--border); padding: 10px 6px; cursor: pointer; font: inherit; color: inherit;
+  }
+  .gs-item:first-of-type { border-top: 0; }
+  .gs-item:hover { background: var(--primary-soft); }
+  .gs-top { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+  .gs-name { font-weight: 600; }
+  .gs-snip { color: var(--text-soft); font-size: 12.5px; word-break: break-word; }
+  .gs-snip mark { background: #fde68a; color: inherit; padding: 0 1px; border-radius: 2px; }
+  .badge.hit { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--primary-soft); color: var(--primary); font-weight: 700; }
+
+  /* 標籤管理 / 客戶標籤浮層 */
+  .tag-pick { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tag-pick label {
+    display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border);
+    border-radius: 999px; padding: 4px 10px; cursor: pointer; font-size: 13px;
+  }
+  .tagmgr-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); }
+  .tagmgr-row:first-child { border-top: 0; }
+  .tagmgr-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .tm-color, .ct-color { width: 34px; height: 26px; padding: 0; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; background: none; }
 </style>
 </head>
 <body>
@@ -86,6 +150,7 @@
 <header class="topbar">
   <h1>LINE OA 客戶進度中樞</h1>
   <span class="sub" id="health-status">連線中…</span>
+  <a class="nav-link" href="kanban.html" title="階段看板(拖曳釘選階段)">▦ 看板</a>
 </header>
 
 <main class="page">
@@ -141,9 +206,10 @@
     <button type="button" class="qf-chip" data-filter="deadline">有到期</button>
   </div>
 
-  <!-- 搜尋 + 階段篩選 + 排序 -->
+  <!-- 搜尋 + 階段篩選 + 排序 + 全站搜尋 / 匯出 / 標籤管理 -->
   <div class="toolbar">
-    <input type="search" id="search-input" placeholder="搜尋客戶名稱…" autocomplete="off">
+    <input type="search" id="search-input" placeholder="搜尋客戶名稱…(Enter 全站搜尋)" autocomplete="off">
+    <button type="button" class="btn" id="global-search-btn" title="搜尋客戶名稱、AI 總結、訊息、檔案內容">🔍 全站搜尋</button>
     <select id="stage-filter" aria-label="階段篩選"></select>
     <select id="sort-filter" aria-label="排序方式">
       <option value="lastMessageAt">排序:最後訊息</option>
@@ -152,8 +218,22 @@
       <option value="fileCount">排序:檔案數</option>
       <option value="msgCount">排序:訊息數</option>
     </select>
+    <button type="button" class="btn" id="export-csv-btn" title="依目前篩選匯出客戶清單 CSV">⬇ 匯出 CSV</button>
+    <button type="button" class="btn" id="manage-tags-btn" hidden title="新增 / 改色 / 刪除標籤定義">🏷 管理標籤</button>
     <span class="count" id="list-count"></span>
   </div>
+
+  <!-- 標籤篩選列(有標籤時才顯示) -->
+  <div class="toolbar tag-filters" id="tag-filters" role="group" aria-label="標籤篩選" hidden></div>
+
+  <!-- 全站搜尋結果面板(執行全站搜尋時顯示) -->
+  <section class="card gsearch-panel" id="gsearch-panel" hidden>
+    <div class="gsearch-head">
+      <span class="reminders-title">🔍 全站搜尋結果</span>
+      <button type="button" class="btn small" id="gsearch-close">關閉</button>
+    </div>
+    <div id="gsearch-body"></div>
+  </section>
 
   <!-- 批次建檔工具列 -->
   <div class="toolbar batchbar">
@@ -216,6 +296,11 @@
   const batchInfo = $('batch-info');
   let quickFilter = 'all'; // all | pending | unbuilt | deadline
   const selected = new Set(); // 已勾選的 chatId(跨自動刷新保留)
+
+  // ---- 標籤狀態 ----
+  let tagsList = [];      // [{id,name,color}] 全部標籤定義
+  const tagsMap = {};     // id → {id,name,color}(供每列 chips 由 tagIds 映射)
+  let tagFilterId = 0;    // 目前標籤篩選;0 = 全部標籤
 
   // ---- 頂部統計(/api/health) ----
   async function loadHealth() {
@@ -290,23 +375,44 @@
     body.innerHTML = '<div class="rem-list">' + list.map(renderReminderRow).join('') + '</div>';
   }
 
+  // 待辦種類 → 標籤(既有三類 deadline/sample/production 由 note 文字描述,不另加標籤;
+  // 新增 pending-build/no-summary 顯示對應標籤;未知種類用預設圖示,絕不報錯)
+  const REMINDER_KIND_LABEL = {
+    'pending-build': '🆕 待建檔',
+    'no-summary': '📝 待生成總結'
+  };
+  const REMINDER_KIND_KNOWN = { deadline: 1, sample: 1, production: 1 };
+  function reminderKindHtml(kind) {
+    const k = String(kind || '');
+    if (REMINDER_KIND_LABEL[k]) {
+      return '<span class="rem-kind">' + UI.esc(REMINDER_KIND_LABEL[k]) + '</span>';
+    }
+    if (REMINDER_KIND_KNOWN[k] || k === '') return ''; // 既有三類:維持原樣式(不加標籤)
+    return '<span class="rem-kind" title="' + UI.esc(k) + '">🔔 待處理</span>'; // 未知種類:預設圖示
+  }
+
   function renderReminderRow(r) {
     const chatId = (r && (r.lineChatId || r.chatId)) || '';
     const name = (r && r.customerName) || '(未命名)';
-    const d = Number(r && r.daysLeft);
-    let cls, text;
-    if (!isFinite(d)) {
-      cls = 'soon'; text = '—';
-    } else if (d < 0) {
-      cls = 'overdue'; text = '逾期 ' + Math.abs(d) + ' 天';
-    } else if (d === 0) {
-      cls = 'overdue'; text = '今天到期';
-    } else {
-      cls = 'soon'; text = '剩 ' + d + ' 天';
+    const raw = (r && r.daysLeft != null) ? r.daysLeft : null;
+    const d = (raw != null) ? Number(raw) : NaN;
+    // 有到期天數(既有三類)才顯示紅/黃倒數徽章;新增種類(daysLeft:null)改以種類標籤呈現
+    let daysHtml = '';
+    if (raw != null && isFinite(d)) {
+      let cls, text;
+      if (d < 0) {
+        cls = 'overdue'; text = '逾期 ' + Math.abs(d) + ' 天';
+      } else if (d === 0) {
+        cls = 'overdue'; text = '今天到期';
+      } else {
+        cls = 'soon'; text = '剩 ' + d + ' 天';
+      }
+      daysHtml = '<span class="rem-days ' + cls + '">' + UI.esc(text) + '</span>';
     }
     const note = (r && r.note) || '';
     return '<button type="button" class="rem-item" data-chatid="' + UI.esc(chatId) + '">' +
-      '<span class="rem-days ' + cls + '">' + UI.esc(text) + '</span>' +
+      daysHtml +
+      reminderKindHtml(r && r.kind) +
       '<span class="rem-name">' + UI.esc(name) + '</span>' +
       UI.stageBadge(r && r.currentStage) +
       '<span class="rem-note">' + UI.esc(note) + '</span>' +
@@ -337,19 +443,28 @@
 
   // ---- 客戶列表 ----
   // silent = true(定時自動刷新)時不清空列表、不顯示載入中;失敗也不覆蓋既有內容
-  async function loadCustomers(silent) {
-    silent = silent === true; // 事件監聽會把 Event 物件傳進來,需嚴格判斷
-    const seq = ++reqSeq;
+  // 依目前工具列狀態組客戶列表查詢參數(客戶列表 + 匯出 CSV 共用,確保匯出=目前檢視)
+  function currentListParams() {
     const q = $('search-input').value.trim();
     const stage = stageSel.value;
     const sort = sortSel.value || 'lastMessageAt';
     const params = new URLSearchParams({ sort: sort });
     if (q) params.set('q', q);
     if (stage) params.set('stage', stage);
-    // 快速篩選(與搜尋/階段可組合);全部=不帶額外條件
+    if (tagFilterId) params.set('tagId', String(tagFilterId));
+    // 快速篩選(與搜尋/階段/標籤可組合);全部=不帶額外條件
     if (quickFilter === 'pending') params.set('followedUp', '1');
     else if (quickFilter === 'unbuilt') params.set('build', 'none');
     else if (quickFilter === 'deadline') params.set('hasDeadline', '1');
+    return params;
+  }
+
+  async function loadCustomers(silent) {
+    silent = silent === true; // 事件監聽會把 Event 物件傳進來,需嚴格判斷
+    const seq = ++reqSeq;
+    const q = $('search-input').value.trim();
+    const stage = stageSel.value;
+    const params = currentListParams();
 
     if (!silent) {
       listState.innerHTML = UI.loadingHtml('載入客戶列表…');
@@ -371,7 +486,7 @@
     if (customers.length === 0) {
       tbody.innerHTML = '';
       $('list-count').textContent = '';
-      const filtered = q || stage || quickFilter !== 'all';
+      const filtered = q || stage || tagFilterId || quickFilter !== 'all';
       listState.innerHTML = UI.emptyHtml(filtered ? '找不到符合條件的客戶' : '尚無客戶資料,請先透過同步插件匯入 LINE 對話');
       syncSelectionUI([]);
       return;
@@ -402,9 +517,17 @@
     const dlAt = c.deadlineAt != null ? c.deadlineAt : (c.deadline && c.deadline.at);
     const dlDays = c.deadlineDaysLeft != null ? c.deadlineDaysLeft : (c.deadline && c.deadline.daysLeft);
     const dlHtml = UI.deadlineBadge(dlAt, dlDays);
+    const chips = customerTags(c).map(UI.tagChipHtml).join('');
+    const nameCell =
+      '<td class="cust-name"><div class="cust-name-wrap">' +
+        '<div class="cust-name-line"><span>' + UI.esc(name) + '</span>' +
+          '<button type="button" class="tag-edit-btn" data-tagbtn="' + UI.esc(chatId) + '" data-name="' + UI.esc(name) + '" title="編輯標籤">🏷 標籤</button>' +
+        '</div>' +
+        (chips ? '<div class="row-tags">' + chips + '</div>' : '') +
+      '</div></td>';
     return '<tr data-chatid="' + UI.esc(chatId) + '">' +
       '<td class="col-check"><input type="checkbox" class="row-check" data-chatid="' + UI.esc(chatId) + '" aria-label="選取"></td>' +
-      '<td class="cust-name">' + UI.esc(name) + '</td>' +
+      nameCell +
       '<td>' + UI.chatTypeBadge(c.chatType) + '</td>' +
       '<td>' + UI.stageBadge(c.currentStage) + '</td>' +
       '<td class="summary-cell" title="' + UI.esc(summary) + '">' +
@@ -479,6 +602,12 @@
 
   // 點列 → 客戶詳情;點「建檔」按鈕 → 送出建檔請求(不進詳情頁);點勾選框 → 不進詳情頁
   tbody.addEventListener('click', function (ev) {
+    const tagBtn = ev.target.closest('button.tag-edit-btn');
+    if (tagBtn) {
+      ev.stopPropagation();
+      openCustomerTagModal(tagBtn.dataset.tagbtn, tagBtn.dataset.name || '(未命名)');
+      return;
+    }
     const btn = ev.target.closest('button.sync-btn');
     if (btn) {
       ev.stopPropagation();
@@ -624,6 +753,333 @@
   $('search-input').addEventListener('input', UI.debounce(loadCustomers, 300));
   stageSel.addEventListener('change', loadCustomers);
 
+  // ====================== 標籤(chips / 篩選 / 客戶標籤 / 管理)======================
+
+  // 由客戶列表資料取出其標籤:相容 c.tags(物件陣列)/ c.tags(id 陣列)/ c.tagIds(id 陣列)
+  function customerTags(c) {
+    if (Array.isArray(c.tags) && c.tags.length && typeof c.tags[0] === 'object') return c.tags;
+    const ids = Array.isArray(c.tagIds) ? c.tagIds : (Array.isArray(c.tags) ? c.tags : []);
+    return ids.map(function (id) { return tagsMap[id]; }).filter(Boolean);
+  }
+
+  // 更新標籤快取(重建 tagsMap;若目前篩選的標籤已不存在則重置為全部)
+  function setTags(list) {
+    tagsList = Array.isArray(list) ? list : [];
+    Object.keys(tagsMap).forEach(function (k) { delete tagsMap[k]; });
+    tagsList.forEach(function (t) { tagsMap[t.id] = t; });
+    if (tagFilterId && !tagsMap[tagFilterId]) tagFilterId = 0;
+  }
+
+  async function loadTags() {
+    try {
+      const data = await API.listTags();
+      setTags((data && data.tags) || []);
+    } catch (e) {
+      // 標籤載入失敗:靜默(不阻擋客戶列表),保留既有快取
+      return;
+    }
+    renderTagFilters();
+  }
+
+  function renderTagFilters() {
+    const box = $('tag-filters');
+    if (!tagsList.length) { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    let html = '<span class="tf-label">標籤:</span>';
+    html += '<button type="button" class="tf-chip' + (tagFilterId === 0 ? ' active' : '') + '" data-tagid="0">全部</button>';
+    html += tagsList.map(function (t) {
+      const active = tagFilterId === t.id ? ' active' : '';
+      return '<button type="button" class="tf-chip' + active + '" data-tagid="' + t.id + '">' +
+        '<span class="tf-dot" style="background:' + UI.sanitizeColor(t.color) + ';"></span>' +
+        UI.esc(t.name) + '</button>';
+    }).join('');
+    box.innerHTML = html;
+  }
+
+  $('tag-filters').addEventListener('click', function (ev) {
+    const chip = ev.target.closest('button.tf-chip');
+    if (!chip) return;
+    const id = Number(chip.dataset.tagid) || 0;
+    if (id === tagFilterId) return;
+    tagFilterId = id;
+    renderTagFilters();
+    loadCustomers();
+  });
+
+  // ---- 浮層工具:建立 modal-overlay/modal-card,回傳 {card, close};onClose 於任何關閉路徑觸發 ----
+  function buildModal(innerHtml, onClose) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const card = document.createElement('div');
+    card.className = 'modal-card';
+    card.innerHTML = innerHtml;
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+    let closed = false;
+    function close() {
+      if (closed) return;
+      closed = true;
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      if (typeof onClose === 'function') onClose();
+    }
+    function onKey(e) { if (e.key === 'Escape') close(); }
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    return { overlay: overlay, card: card, close: close };
+  }
+
+  // ---- 客戶標籤浮層:勾選現有標籤 + 新增標籤給該客戶(PUT customer tags 整批覆蓋) ----
+  async function openCustomerTagModal(chatId, name) {
+    if (!chatId) return;
+    const m = buildModal(
+      '<h2>🏷 標籤 — ' + UI.esc(name) + '</h2>' +
+      '<div id="ct-pick" class="tag-pick"><span class="rem-empty">載入中…</span></div>' +
+      '<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px;">' +
+        '<label style="font-size:13px;color:var(--text-soft);">新增標籤</label>' +
+        '<div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap;">' +
+          '<input id="ct-new-name" type="text" placeholder="標籤名稱" maxlength="20" style="flex:1;min-width:120px;">' +
+          '<input id="ct-new-color" class="ct-color" type="color" value="#2563eb" title="顏色">' +
+          '<button type="button" class="btn small" id="ct-new-add">新增</button>' +
+        '</div>' +
+        '<div class="modal-err" id="ct-new-err"></div>' +
+      '</div>' +
+      '<div class="modal-err" id="ct-err"></div>' +
+      '<div class="modal-actions">' +
+        '<button type="button" class="btn" id="ct-cancel">取消</button>' +
+        '<button type="button" class="btn primary" id="ct-save">儲存</button>' +
+      '</div>'
+    );
+    const pick = m.card.querySelector('#ct-pick');
+    const errBox = m.card.querySelector('#ct-err');
+    const currentIds = new Set();
+
+    function renderPick() {
+      if (!tagsList.length) {
+        pick.innerHTML = '<span class="rem-empty">尚無標籤,請於下方新增</span>';
+        return;
+      }
+      pick.innerHTML = tagsList.map(function (t) {
+        const ck = currentIds.has(t.id) ? ' checked' : '';
+        return '<label><input type="checkbox" value="' + t.id + '"' + ck + '>' +
+          '<span class="tf-dot" style="background:' + UI.sanitizeColor(t.color) + ';"></span>' +
+          UI.esc(t.name) + '</label>';
+      }).join('');
+    }
+
+    try {
+      const res = await Promise.all([API.listTags(), API.getCustomerTags(chatId)]);
+      setTags((res[0] && res[0].tags) || tagsList);
+      ((res[1] && res[1].tags) || []).forEach(function (t) { currentIds.add(t.id); });
+      renderPick();
+    } catch (e) {
+      pick.innerHTML = '<span class="rem-empty">標籤載入失敗:' + UI.esc(e.message) + '</span>';
+    }
+
+    // 新增標籤(建定義 → 立即勾選)
+    m.card.querySelector('#ct-new-add').addEventListener('click', async function () {
+      const nm = m.card.querySelector('#ct-new-name').value.trim();
+      const col = m.card.querySelector('#ct-new-color').value || '#2563eb';
+      const nErr = m.card.querySelector('#ct-new-err');
+      if (!nm) { nErr.textContent = '請輸入標籤名稱'; return; }
+      nErr.textContent = '';
+      try {
+        const res = await API.createTag(nm, col);
+        const tag = res && res.tag;
+        if (tag) { tagsList = tagsList.concat([tag]); tagsMap[tag.id] = tag; currentIds.add(tag.id); }
+        m.card.querySelector('#ct-new-name').value = '';
+        renderPick();
+      } catch (e) {
+        nErr.textContent = (e.status === 409 ? '標籤名稱已存在' : ('新增失敗:' + e.message));
+      }
+    });
+
+    m.card.querySelector('#ct-save').addEventListener('click', async function () {
+      const ids = Array.prototype.map.call(
+        pick.querySelectorAll('input[type=checkbox]:checked'),
+        function (cb) { return Number(cb.value); }
+      );
+      errBox.textContent = '';
+      const saveBtn = m.card.querySelector('#ct-save');
+      saveBtn.disabled = true;
+      try {
+        await API.setCustomerTags(chatId, ids);
+        m.close();
+        renderTagFilters();
+        loadCustomers();
+      } catch (e) {
+        errBox.textContent = '儲存失敗:' + e.message;
+        saveBtn.disabled = false;
+      }
+    });
+    m.card.querySelector('#ct-cancel').addEventListener('click', m.close);
+    const nameInput = m.card.querySelector('#ct-new-name');
+    if (nameInput) nameInput.focus();
+  }
+
+  // ---- 標籤管理浮層(管理員):新增 / 改色 / 刪除標籤定義 ----
+  async function openTagManager() {
+    let dirty = false;
+    const m = buildModal(
+      '<h2>🏷 管理標籤</h2>' +
+      '<p style="margin:2px 0 10px;font-size:13px;color:var(--text-soft);">新增、改色或刪除標籤定義。刪除會一併移除所有客戶身上的此標籤。</p>' +
+      '<div id="tm-list"><span class="rem-empty">載入中…</span></div>' +
+      '<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+        '<input id="tm-new-name" type="text" placeholder="新標籤名稱" maxlength="20" style="flex:1;min-width:120px;">' +
+        '<input id="tm-new-color" class="tm-color" type="color" value="#2563eb">' +
+        '<button type="button" class="btn small primary" id="tm-add">新增標籤</button>' +
+      '</div>' +
+      '<div class="modal-err" id="tm-err"></div>' +
+      '<div class="modal-actions"><button type="button" class="btn" id="tm-close">關閉</button></div>',
+      function () { if (dirty) { renderTagFilters(); loadCustomers(); } }
+    );
+    const listBox = m.card.querySelector('#tm-list');
+    const errBox = m.card.querySelector('#tm-err');
+
+    function render() {
+      if (!tagsList.length) { listBox.innerHTML = '<span class="rem-empty">尚無標籤,於下方新增</span>'; return; }
+      listBox.innerHTML = tagsList.map(function (t) {
+        return '<div class="tagmgr-row" data-id="' + t.id + '">' +
+          '<input type="color" class="tm-color" value="' + UI.sanitizeColor(t.color) + '" title="改色">' +
+          '<span class="tagmgr-name">' + UI.esc(t.name) + '</span>' +
+          '<button type="button" class="btn small danger tm-del">刪除</button>' +
+        '</div>';
+      }).join('');
+    }
+    async function reload() {
+      try { const res = await API.listTags(); setTags((res && res.tags) || []); }
+      catch (e) { listBox.innerHTML = '<span class="rem-empty">載入失敗:' + UI.esc(e.message) + '</span>'; return; }
+      render();
+    }
+
+    // 改色(input change)
+    listBox.addEventListener('change', async function (ev) {
+      const inp = ev.target.closest('input.tm-color');
+      if (!inp) return;
+      const row = inp.closest('.tagmgr-row');
+      const id = Number(row.dataset.id);
+      errBox.textContent = '';
+      try {
+        await API.updateTag(id, { color: inp.value });
+        if (tagsMap[id]) tagsMap[id].color = inp.value;
+        dirty = true;
+      } catch (e) { errBox.textContent = '改色失敗:' + e.message; }
+    });
+    // 刪除
+    listBox.addEventListener('click', async function (ev) {
+      const del = ev.target.closest('button.tm-del');
+      if (!del) return;
+      const row = del.closest('.tagmgr-row');
+      const id = Number(row.dataset.id);
+      const t = tagsMap[id];
+      if (!confirm('刪除標籤「' + (t ? t.name : '') + '」?將移除所有客戶身上的此標籤,無法復原。')) return;
+      errBox.textContent = '';
+      try { await API.deleteTag(id); dirty = true; await reload(); }
+      catch (e) { errBox.textContent = '刪除失敗:' + e.message; }
+    });
+    // 新增
+    m.card.querySelector('#tm-add').addEventListener('click', async function () {
+      const nm = m.card.querySelector('#tm-new-name').value.trim();
+      const col = m.card.querySelector('#tm-new-color').value || '#2563eb';
+      if (!nm) { errBox.textContent = '請輸入標籤名稱'; return; }
+      errBox.textContent = '';
+      try {
+        await API.createTag(nm, col);
+        dirty = true;
+        m.card.querySelector('#tm-new-name').value = '';
+        await reload();
+      } catch (e) {
+        errBox.textContent = (e.status === 409 ? '標籤名稱已存在' : ('新增失敗:' + e.message));
+      }
+    });
+    m.card.querySelector('#tm-close').addEventListener('click', m.close);
+    await reload();
+  }
+
+  $('manage-tags-btn').addEventListener('click', openTagManager);
+
+  // ====================== 全站搜尋 ======================
+  const HIT_LABELS = {
+    customer: '客戶', name: '客戶', summary: '總結', message: '訊息',
+    file: '檔案', note: '備註', tag: '標籤', team: '討論'
+  };
+  function hitLabel(t) {
+    const k = String(t || '').toLowerCase();
+    return HIT_LABELS[k] || (t ? String(t) : '命中');
+  }
+
+  // 先 escape 再以查詢字串包 <mark>(在已跳脫文字上加標記,安全)
+  function highlight(text, q) {
+    const safe = UI.esc(text || '');
+    const term = String(q || '').trim();
+    if (!term) return safe;
+    const re = new RegExp('(' + term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+    return safe.replace(re, '<mark>$1</mark>');
+  }
+
+  function closeGlobalSearch() {
+    const panel = $('gsearch-panel');
+    panel.hidden = true;
+    $('gsearch-body').innerHTML = '';
+  }
+
+  async function runGlobalSearch() {
+    const q = $('search-input').value.trim();
+    const panel = $('gsearch-panel');
+    const body = $('gsearch-body');
+    if (!q) { closeGlobalSearch(); return; }
+    panel.hidden = false;
+    body.innerHTML = UI.loadingHtml('搜尋「' + UI.esc(q) + '」…');
+    let data;
+    try {
+      data = await API.search(q);
+    } catch (e) {
+      body.innerHTML = UI.errorHtml('搜尋失敗:' + e.message);
+      return;
+    }
+    const results = (data && data.results) || [];
+    if (results.length === 0) {
+      body.innerHTML = UI.emptyHtml('找不到與「' + q + '」相符的結果');
+      return;
+    }
+    body.innerHTML = results.map(function (r) {
+      const cid = (r && (r.lineChatId || r.chatId)) || '';
+      const nm = (r && (r.customerName || r.name || r.lineName)) || '(未命名)';
+      const snip = (r && (r.snippet || r.text || r.body)) || '';
+      return '<button type="button" class="gs-item" data-chatid="' + UI.esc(cid) + '">' +
+        '<div class="gs-top"><span class="gs-name">' + UI.esc(nm) + '</span>' +
+        '<span class="badge hit">' + UI.esc(hitLabel(r && (r.matchType || r.hitType))) + '</span></div>' +
+        (snip ? '<div class="gs-snip">' + highlight(snip, q) + '</div>' : '') +
+        '</button>';
+    }).join('');
+  }
+
+  $('gsearch-body').addEventListener('click', function (ev) {
+    const item = ev.target.closest('button.gs-item');
+    if (!item || !item.dataset.chatid) return;
+    location.href = 'customer.html?chatId=' + encodeURIComponent(item.dataset.chatid);
+  });
+  $('gsearch-close').addEventListener('click', closeGlobalSearch);
+  $('global-search-btn').addEventListener('click', runGlobalSearch);
+  // Enter=全站搜尋(即時客戶名篩選仍走 input 事件,保留不變)
+  $('search-input').addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    if (e.isComposing || e.keyCode === 229) return; // 輸入法選字中
+    e.preventDefault();
+    runGlobalSearch();
+  });
+
+  // ====================== 匯出 CSV ======================
+  $('export-csv-btn').addEventListener('click', function () {
+    const qs = currentListParams().toString();
+    const a = document.createElement('a');
+    a.href = API.EXPORT_CUSTOMERS_CSV + (qs ? ('?' + qs) : '');
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  });
+
   // ---- 啟動:先 me(掛右上角使用者 chip);401 由 api.js 統一轉跳 login.html ----
   (async function start() {
     const me = await UI.initAuth();
@@ -631,9 +1087,10 @@
       $('health-status').textContent = '未登入或無法連線到後端服務';
       return;
     }
+    if (me.role === '管理') $('manage-tags-btn').hidden = false;
     loadHealth();
     loadDashboard();
-    loadCustomers();
+    loadTags().then(loadCustomers); // 先載標籤(供每列 chips 映射),再載客戶
 
     // 24x7 看板:每 60 秒自動刷新統計卡、待辦提醒、客戶列表與相對時間(reqSeq 防競態,可安全重入)
     // 真正掛牆上的看板永遠可見,照常刷新;隱藏/背景分頁暫停,避免閒置分頁持續打後端

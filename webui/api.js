@@ -595,6 +595,140 @@
     return post('/api/summarize/' + encodeURIComponent(chatId) + orderQS(orderId, extra));
   }
 
+  /**
+   * 串流版產生/重生總結(SSE)。POST /api/summarize/:chatId/stream?force=1&orderId=N,
+   * 讀 response.body 的 ReadableStream 解析 SSE 事件:
+   *   event: delta → data 為 {"text":"…"} 或純文字 → onDelta(text)(即時預覽)。
+   *                  注意:text 是「累積快照」(從頭到目前的完整 summaryText),非增量片段;
+   *                  呼叫端須以覆蓋方式渲染(el.textContent = text),不可累加。
+   *   event: done  → data 為 {"summary":{…}} 或 summary 物件 → resolve(summary) 並 onDone(summary)
+   *   event: error → data 為 {"error":"…"} 或純文字 → reject(Error) 並 onError(msg)
+   *
+   * 這只是「多一條可選傳輸通道」:任何失敗(舊瀏覽器無 ReadableStream、網路斷、
+   * 非 2xx、SSE 解析錯、未收到 done)一律 throw,呼叫端據此退回既有非串流 summarizeFor。
+   * 401 沿用既有導頁邏輯。回傳 Promise<summary>。
+   */
+  async function summarizeStream(chatId, opts) {
+    opts = opts || {};
+    const force = !!opts.force;
+    const orderId = Number(opts.orderId) || 0;
+    const onDelta = typeof opts.onDelta === 'function' ? opts.onDelta : null;
+    const onDone = typeof opts.onDone === 'function' ? opts.onDone : null;
+    const onError = typeof opts.onError === 'function' ? opts.onError : null;
+
+    // 舊瀏覽器不支援 fetch 串流 → 直接讓呼叫端退回非串流 POST
+    if (typeof fetch !== 'function' || typeof ReadableStream === 'undefined' ||
+        typeof TextDecoder === 'undefined') {
+      throw new Error('瀏覽器不支援串流');
+    }
+
+    const url = '/api/summarize/' + encodeURIComponent(chatId) + '/stream' +
+      orderQS(orderId, force ? { force: '1' } : null);
+
+    let res;
+    try {
+      res = await fetch(url, { method: 'POST', headers: { 'Accept': 'text/event-stream' } });
+    } catch (e) {
+      const err = new Error('無法連線到後端服務'); err.status = 0; err.cause = e;
+      throw err;
+    }
+
+    // 非 2xx:401 沿用既有導頁;其餘一律拋出讓呼叫端退回非串流
+    if (!res.ok) {
+      if (res.status === 401 && !opts.noAuthRedirect) gotoLogin();
+      let data = null;
+      const ct = res.headers.get('content-type') || '';
+      if (ct.indexOf('application/json') !== -1) { try { data = await res.json(); } catch (e) { /* 容錯 */ } }
+      const err = new Error((data && (data.error || data.message)) || ('HTTP ' + res.status));
+      err.status = res.status; err.data = data;
+      throw err;
+    }
+    if (!res.body || typeof res.body.getReader !== 'function') {
+      throw new Error('串流不可用'); // 讓呼叫端退回非串流
+    }
+
+    // data 可能是 JSON({text}/{summary}/{error})或純文字,寬鬆解析
+    function jsonOrNull(str) {
+      const s = String(str == null ? '' : str).trim();
+      if (!s) return null;
+      try { return JSON.parse(s); } catch (e) { return null; }
+    }
+
+    let summary = null;
+    let doneReceived = false;
+    let streamError = null;
+
+    function handleEvent(rawEvent) {
+      let eventName = 'message';
+      const dataLines = [];
+      rawEvent.split('\n').forEach(function (rawLine) {
+        let line = rawLine;
+        if (line.charCodeAt(0) === 0xFEFF) line = line.slice(1); // 去 BOM
+        if (line === '' || line.charAt(0) === ':') return;        // 空行 / 註解(含心跳)
+        const idx = line.indexOf(':');
+        let field, value;
+        if (idx === -1) { field = line; value = ''; }
+        else {
+          field = line.slice(0, idx);
+          value = line.slice(idx + 1);
+          if (value.charAt(0) === ' ') value = value.slice(1); // SSE 規範:冒號後首個空格略過
+        }
+        if (field === 'event') eventName = value.trim();
+        else if (field === 'data') dataLines.push(value);
+      });
+      if (dataLines.length === 0) return;
+      const dataStr = dataLines.join('\n');
+      const parsed = jsonOrNull(dataStr);
+      if (eventName === 'delta') {
+        let text = dataStr;
+        if (parsed && typeof parsed === 'object' && typeof parsed.text === 'string') text = parsed.text;
+        else if (typeof parsed === 'string') text = parsed;
+        if (text && onDelta) onDelta(text);
+      } else if (eventName === 'done') {
+        summary = (parsed && (parsed.summary || parsed)) || null;
+        doneReceived = true;
+      } else if (eventName === 'error') {
+        streamError = (parsed && (parsed.error || parsed.message)) || dataStr || '串流錯誤';
+      }
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buf = '';
+    try {
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        buf += decoder.decode(chunk.value, { stream: true });
+        buf = buf.replace(/\r\n/g, '\n').replace(/\r/g, '\n'); // 正規化換行,事件以空行分隔
+        let sep;
+        while ((sep = buf.indexOf('\n\n')) !== -1) {
+          const rawEvent = buf.slice(0, sep);
+          buf = buf.slice(sep + 2);
+          if (rawEvent.trim() !== '') handleEvent(rawEvent);
+        }
+        if (streamError) break; // 後端主動報錯 → 停止讀取
+      }
+      buf += decoder.decode();
+      if (!streamError && buf.trim() !== '') handleEvent(buf); // flush 尾端未以空行結束的事件
+    } catch (e) {
+      try { reader.cancel(); } catch (_) { /* 忽略 */ }
+      const err = new Error('串流中斷:' + (e && e.message ? e.message : String(e)));
+      err.cause = e;
+      throw err;
+    }
+
+    if (streamError) {
+      if (onError) onError(streamError);
+      throw new Error(streamError);
+    }
+    if (!doneReceived || !summary) {
+      throw new Error('串流未完成'); // 未收到 done/summary → 退回非串流
+    }
+    if (onDone) onDone(summary);
+    return summary;
+  }
+
   // ---------- 檔案上傳(同事;multipart) ----------
 
   /**
@@ -698,6 +832,36 @@
   /** GET /api/usage/recent?limit= → {items:[{id,lineChatId,orderId,model,durationMs,ok,error,trigger,createdAt}]} */
   function getUsageRecent(limit) {
     return get('/api/usage/recent' + (limit ? ('?limit=' + encodeURIComponent(limit)) : ''));
+  }
+
+  // ---------- 備份管理(僅管理;admin.html 用) ----------
+  // 後端契約(由 backend backup 路由提供;備份檔寫到 backend/backups/,已 gitignore):
+  //   GET  /api/backup/list            → {backups:[{name,size,createdAt}]}(倒序;name = 檔名)
+  //   POST /api/backup/run             → {ok:true, backup:{name,size,createdAt}}(立即備份一份)
+  //   GET  /api/backup/download/:name  → 直接下載該備份檔(Content-Disposition: attachment;走同源 cookie)
+
+  /** 備份清單 → {backups:[{name,size,createdAt}]}(前端防禦性讀取多種欄位命名) */
+  function listBackups() { return get('/api/backup/list'); }
+  /** 立即備份一份 → {ok, backup} */
+  function runBackup() { return post('/api/backup/run'); }
+  /** 某備份檔的下載網址(前端以 <a href>/window.open 直接下載;同源自帶 session cookie) */
+  function backupDownloadUrl(name) {
+    return '/api/backup/download/' + encodeURIComponent(name);
+  }
+
+  // ---------- 審計日志(全站;僅管理;admin.html 用) ----------
+  // GET /api/audit?user=&action=&limit= → {logs:[{id,lineChatId,userId,userName,action,target,detail,createdAt}]} 倒序
+  // 篩選參數後端可忽略(前端另做客端下拉篩選,零依賴後端是否支援 query)。
+  /** 全站審計日志;params 可含 {user, action, limit} */
+  function listAudit(params) {
+    const p = new URLSearchParams();
+    if (params) {
+      if (params.user) p.set('user', String(params.user));
+      if (params.action) p.set('action', String(params.action));
+      if (params.limit) p.set('limit', String(params.limit));
+    }
+    const qs = p.toString();
+    return get('/api/audit' + (qs ? ('?' + qs) : ''));
   }
 
   // ---------- 通知鈴鐺(index / customer / users 頂欄,掛在使用者 chip 旁) ----------
@@ -822,6 +986,69 @@
     if (!bellTimer) bellTimer = setInterval(pollBell, 30000);
   }
 
+  // ---------- 客戶標籤(共享定義 + 客戶多對多)/ 全站搜尋 / 匯出 ----------
+  // 後端契約(由 backend 標籤/搜尋/匯出路由提供;schema:tags / customer_tags):
+  //   GET    /api/tags                         → {tags:[{id,name,color,createdAt}]}
+  //   POST   /api/tags {name,color}            → {ok:true, tag:{id,name,color,createdAt}}
+  //   PUT    /api/tags/:id {name?,color?}      → {ok:true, tag}(改名/改色;僅管理)
+  //   DELETE /api/tags/:id                     → {ok:true}(連帶清 customer_tags;僅管理)
+  //   GET    /api/customers/:chatId/tags       → {tags:[{id,name,color}]}
+  //   PUT    /api/customers/:chatId/tags {tagIds:[...]} → {ok:true, tags:[...]}(整批覆蓋)
+  //   GET    /api/customers?...&tagId=N        → 依標籤篩選(併入既有客戶列表)
+  //   GET    /api/search?q=                    → {results:[{lineChatId,customerName,matchType,snippet}]}
+  //   GET    /api/export/customers.csv?...      → CSV 下載(Content-Disposition: attachment)
+
+  /** 所有標籤定義 → {tags:[{id,name,color,createdAt}]} */
+  function listTags() { return get('/api/tags'); }
+  /** 新增標籤定義 → {ok,tag} */
+  function createTag(name, color) { return post('/api/tags', { name: name, color: color }); }
+  /** 改標籤定義(名稱/顏色;只送要改的欄位) → {ok,tag} */
+  function updateTag(id, patch) { return put('/api/tags/' + encodeURIComponent(id), patch); }
+  /** 刪標籤定義(連帶清所有客戶的此標籤) → {ok} */
+  function deleteTag(id) { return del('/api/tags/' + encodeURIComponent(id)); }
+  /** 某客戶目前的標籤 → {tags:[{id,name,color}]} */
+  function getCustomerTags(chatId) {
+    return get('/api/customers/' + encodeURIComponent(chatId) + '/tags');
+  }
+  /** 整批覆蓋某客戶的標籤(去重、濾非正整數) → {ok,tags} */
+  function setCustomerTags(chatId, tagIds) {
+    const ids = Array.isArray(tagIds)
+      ? Array.from(new Set(tagIds.map(Number).filter(function (n) { return Number.isFinite(n) && n > 0; })))
+      : [];
+    return put('/api/customers/' + encodeURIComponent(chatId) + '/tags', { tagIds: ids });
+  }
+
+  /**
+   * 客戶列表(看板 / 列表共用)。params 可為 URLSearchParams、查詢字串或物件;
+   * 省略則取全部。回傳 {customers:[{lineChatId,lineName,currentStage,followedUp,
+   * msgCount,fileCount,deadlineAt,syncStatus,tags:[{id,name,color}],lastMessageAt,...}]}。
+   */
+  function getCustomers(params) {
+    let qs = '';
+    if (params instanceof URLSearchParams) qs = params.toString();
+    else if (typeof params === 'string') qs = params.replace(/^\?/, '');
+    else if (params && typeof params === 'object') qs = new URLSearchParams(params).toString();
+    return get('/api/customers' + (qs ? ('?' + qs) : ''));
+  }
+
+  /**
+   * 設定 / 清除人工釘選階段(看板拖曳用)。
+   * stage 傳階段名(如 '已打樣')= 人工釘選並覆蓋 AI 判定;傳 null/'' = 清除釘選回自動判定。
+   * 走既有 PUT /api/customers/:chatId/progress/meta {stageOverride}。
+   */
+  function setStageOverride(chatId, stage) {
+    const s = (stage === null || stage === undefined || stage === '') ? null : String(stage);
+    return putMeta(chatId, { stageOverride: s });
+  }
+
+  /** 全站搜尋(客戶名/總結/訊息/檔案/備註…) → {results:[{lineChatId,customerName,matchType,snippet}]} */
+  function search(q) {
+    return get('/api/search?q=' + encodeURIComponent(q || ''));
+  }
+
+  /** 匯出客戶清單 CSV 的端點(前端以 <a> 直接下載;可帶與客戶列表相同的篩選查詢字串) */
+  const EXPORT_CUSTOMERS_CSV = '/api/export/customers.csv';
+
   // ---------- 格式化工具 ----------
 
   /** HTML escape,所有伺服器文字必經此函式 */
@@ -830,6 +1057,33 @@
     return String(s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  /** 顏色淨化:只接受 #rgb / #rrggbb,否則回預設灰(防 style 注入 + 容錯) */
+  function sanitizeColor(c) {
+    const s = String(c || '').trim();
+    return /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(s) ? s : '#6b7280';
+  }
+
+  /** 依背景色亮度算可讀文字色(淺底→深字,深底→白字) */
+  function readableTextColor(bg) {
+    const hex = sanitizeColor(bg).replace(/^#/, '');
+    let r, g, b;
+    if (hex.length === 3) {
+      r = parseInt(hex[0] + hex[0], 16); g = parseInt(hex[1] + hex[1], 16); b = parseInt(hex[2] + hex[2], 16);
+    } else {
+      r = parseInt(hex.slice(0, 2), 16); g = parseInt(hex.slice(2, 4), 16); b = parseInt(hex.slice(4, 6), 16);
+    }
+    const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return lum > 0.62 ? '#1f2937' : '#ffffff';
+  }
+
+  /** 標籤徽章 HTML(彩色小徽章;顏色淨化 + 名稱 escape) */
+  function tagChipHtml(tag) {
+    if (!tag || !tag.name) return '';
+    const bg = sanitizeColor(tag.color);
+    const fg = readableTextColor(bg);
+    return '<span class="tag-chip" style="background:' + bg + ';color:' + fg + ';">' + esc(tag.name) + '</span>';
   }
 
   /** epoch ms → 相對時間(繁體) */
@@ -926,17 +1180,25 @@
     getOrders: getOrders, createOrder: createOrder, updateOrder: updateOrder, deleteOrder: deleteOrder,
     getProgressFor: getProgressFor, putTaskFor: putTaskFor, putMetaFor: putMetaFor,
     getSummariesFor: getSummariesFor, getMessagesFor: getMessagesFor, summarizeFor: summarizeFor,
+    summarizeStream: summarizeStream,
     uploadFile: uploadFile,
     suggestMentions: suggestMentions, getMyMentions: getMyMentions, readMentions: readMentions,
     editSummary: editSummary, getAnnotations: getAnnotations, addAnnotation: addAnnotation,
     getAudit: getAudit,
-    getAdminHealth: getAdminHealth, getUsageSummary: getUsageSummary, getUsageRecent: getUsageRecent
+    getAdminHealth: getAdminHealth, getUsageSummary: getUsageSummary, getUsageRecent: getUsageRecent,
+    listBackups: listBackups, runBackup: runBackup, backupDownloadUrl: backupDownloadUrl,
+    listAudit: listAudit,
+    listTags: listTags, createTag: createTag, updateTag: updateTag, deleteTag: deleteTag,
+    getCustomerTags: getCustomerTags, setCustomerTags: setCustomerTags,
+    getCustomers: getCustomers, setStageOverride: setStageOverride,
+    search: search, EXPORT_CUSTOMERS_CSV: EXPORT_CUSTOMERS_CSV
   };
   global.UI = {
     esc: esc, relTime: relTime, fmtDate: fmtDate, fmtDateTime: fmtDateTime, pad2: pad2,
     fmtSize: fmtSize, parseMaybeJson: parseMaybeJson, qsParam: qsParam, debounce: debounce,
     stageLabel: stageLabel, stageBadge: stageBadge, chatTypeBadge: chatTypeBadge,
     syncBadge: syncBadge, roleBadge: roleBadge, deadlineBadge: deadlineBadge,
+    sanitizeColor: sanitizeColor, readableTextColor: readableTextColor, tagChipHtml: tagChipHtml,
     initAuth: initAuth,
     TEAM_ROLES: TEAM_ROLES,
     STAGE_OPTIONS: STAGE_OPTIONS,

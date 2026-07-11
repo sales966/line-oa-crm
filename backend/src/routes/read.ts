@@ -14,9 +14,9 @@ function parseOrderId(v: unknown): number {
 }
 
 export default async function readRoutes(app: FastifyInstance): Promise<void> {
-  // GET /api/customers?q=&stage=&sort=&followedUp=1&build=none|done&hasDeadline=1
+  // GET /api/customers?q=&stage=&sort=&followedUp=1&build=none|done&hasDeadline=1&tagId=N
   // sort:lastMessageAt(默认)/deadlineAt/currentStage/fileCount/msgCount(非白名单回默认)
-  // 筛选 followedUp/build/hasDeadline 皆可选、可组合;每客户额外带 deadlineAt / syncStatus
+  // 筛选 followedUp/build/hasDeadline/tagId 皆可选、可组合;每客户额外带 deadlineAt / syncStatus / tags
   app.get('/api/customers', async (req) => {
     const q = req.query as {
       q?: string;
@@ -25,6 +25,7 @@ export default async function readRoutes(app: FastifyInstance): Promise<void> {
       followedUp?: string;
       build?: string;
       hasDeadline?: string;
+      tagId?: string;
     };
     return {
       customers: chatService.listCustomers({
@@ -34,6 +35,7 @@ export default async function readRoutes(app: FastifyInstance): Promise<void> {
         followedUp: q.followedUp,
         build: q.build,
         hasDeadline: q.hasDeadline,
+        tagId: q.tagId,
       }),
     };
   });
