@@ -140,6 +140,11 @@
         <a href="#sec-sync">➕ 加入客戶同步</a>
         <a href="#sec-backend">🖥 後台怎麼用</a>
         <a href="#sec-stages">📊 五階段含義</a>
+        <a href="#sec-list-tools">🏷 列表新工具</a>
+        <a href="#sec-kanban">▦ 看板視圖</a>
+        <a href="#sec-client-new">🖨 客戶頁新功能</a>
+        <a href="#sec-reminders">⏰ 待辦提醒</a>
+        <a href="#sec-admin">🛡 管理員功能</a>
         <a href="#sec-faq">❓ 常見問題</a>
       </div>
     </section>
@@ -268,6 +273,96 @@
         💡 系統會依對話內容用 AI 自動判斷目前階段,但你隨時可手動點燈調整或「鎖定」階段;
         手動設定優先,AI 不會覆蓋。
       </div>
+    </section>
+
+    <section class="card help-card" id="sec-list-tools">
+      <h2>🏷 客戶列表新工具(標籤・搜尋・匯出)</h2>
+      <p class="help-lead">
+        客戶列表最上方的工具列與每一列右側,新增了幾個提升找人、分類與整理效率的工具。
+      </p>
+
+      <h3>🏷 客戶標籤</h3>
+      <ul>
+        <li><strong>在哪:</strong>客戶列表每一列都有「🏷 標籤」鈕;工具列有「依標籤篩選」的選項。</li>
+        <li><strong>怎麼用:</strong>點該列的「🏷 標籤」鈕,勾選要貼的標籤(例如 <em>急件 / VIP / 負責業務</em>),一位客戶可同時貼多個。要只看某類客戶時,用工具列的標籤篩選。</li>
+        <li><strong>管理員:</strong>在「管理標籤」頁可新增標籤、改顏色、改名、刪除標籤定義。刪除標籤會從所有客戶身上一併移除。</li>
+        <li><strong>注意:</strong>標籤是全公司共用的,任何人貼上或管理員改動,大家看到的都一樣,請沿用團隊共識的命名。</li>
+      </ul>
+
+      <h3>🔍 全站搜尋</h3>
+      <ul>
+        <li><strong>在哪:</strong>客戶列表工具列的搜尋框。</li>
+        <li><strong>怎麼用:</strong>輸入關鍵字後,不只比對客戶名稱,還會搜「對話內容」與「AI 總結內容」;點搜尋結果可直接進入該客戶頁。</li>
+        <li><strong>注意:</strong>適合「記得跟某客戶聊過某個產品或規格,但忘了是哪一位」的情況,用內容關鍵字就能撈回來。</li>
+      </ul>
+
+      <h3>⬇ 匯出 CSV</h3>
+      <ul>
+        <li><strong>在哪:</strong>客戶列表工具列的「匯出 CSV」鈕。</li>
+        <li><strong>怎麼用:</strong>一鍵下載全部客戶清單(含階段、死線、總結、標籤等欄位),用 Excel 直接打開即可。</li>
+        <li><strong>注意:</strong>檔案已處理好中文編碼,用 Excel 開不會亂碼;適合整理報表或離線盤點。</li>
+      </ul>
+    </section>
+
+    <section class="card help-card" id="sec-kanban">
+      <h2>▦ 看板視圖</h2>
+      <ul>
+        <li><strong>在哪:</strong>從上方導覽列點「看板」進入。</li>
+        <li><strong>版面:</strong>共 6 欄,對應 <em>洽談 / 已回簽 / 已打樣 / 已出廠 / 已交付</em> 五個階段,再加一欄「流失」,一眼看清每個階段各卡著哪些客戶。</li>
+        <li><strong>怎麼用:</strong>用滑鼠把客戶卡片拖曳到別欄,就等於人工釘選該客戶的階段(會覆蓋 AI 的自動判斷)。想恢復自動判定時,點卡片上的「↺ 自動」即可。</li>
+        <li><strong>注意:</strong>拖曳釘選=手動鎖定階段,之後 AI 不會再自動調整;若希望系統重新依對話判斷,記得按「↺ 自動」解除釘選。</li>
+      </ul>
+    </section>
+
+    <section class="card help-card" id="sec-client-new">
+      <h2>🖨 客戶頁新功能(串流總結・列印)</h2>
+
+      <h3>⚡ 總結串流生成</h3>
+      <ul>
+        <li><strong>在哪:</strong>客戶頁按「重新生成總結」時。</li>
+        <li><strong>怎麼用:</strong>文字會即時一句句浮現(像打字機一樣),可以邊看邊等,不必盯著轉圈苦等整段跑完。</li>
+        <li><strong>注意:</strong>若你的瀏覽器不支援串流,系統會自動退回原本「整段一次出現」的方式,最後結果一樣,不影響使用。</li>
+      </ul>
+
+      <h3>🖨 列印 / PDF</h3>
+      <ul>
+        <li><strong>在哪:</strong>客戶頁的「列印 / PDF」鈕。</li>
+        <li><strong>怎麼用:</strong>點下後開啟列印視窗,可直接印出該客戶的總結、進度與死線;在印表機選單選「另存為 PDF」即可存成檔案。</li>
+        <li><strong>注意:</strong>很適合開會、交接或給主管過目時,做成紙本或 PDF 帶著走。</li>
+      </ul>
+    </section>
+
+    <section class="card help-card" id="sec-reminders">
+      <h2>⏰ 待辦提醒增強</h2>
+      <ul>
+        <li><strong>在哪:</strong>首頁(客戶列表)上方的待辦提醒區。</li>
+        <li><strong>新增內容:</strong>除了原本的「死線將到」「打樣到期」「生產到期」,再新增兩種提醒——<em>待建檔</em>(還沒建檔的客戶)與<em>尚未生成總結</em>的客戶。</li>
+        <li><strong>怎麼用:</strong>點提醒項目可直接跳到對應客戶處理。看到「待建檔」就去按「🔄 建檔」補歷史;看到「尚未生成總結」就進客戶頁按「重新生成總結」。</li>
+        <li><strong>注意:</strong>把這幾項清空,代表每位客戶都已建檔且有最新總結,團隊掌握度最完整。</li>
+      </ul>
+    </section>
+
+    <section class="card help-card" id="sec-admin">
+      <h2>🛡 管理員專用:備份與審計日誌</h2>
+      <p class="help-lead">
+        以下兩項都在「系統健康」頁,僅「管理」角色可見。
+      </p>
+
+      <h3>💾 資料庫備份</h3>
+      <ul>
+        <li><strong>在哪:</strong>管理員的「系統健康」頁。</li>
+        <li><strong>自動:</strong>系統每 6 小時自動備份一次整個資料庫,並保留最近 30 份,更舊的會自動清除,不用擔心塞爆硬碟。</li>
+        <li><strong>怎麼用:</strong>在頁面上可看到備份清單、按「立即備份」手動備份一份,或按「下載」把備份檔存到自己電腦保管。</li>
+        <li><strong>注意:</strong>遇到重要節點(例如剛大量建檔完)建議手動備份一份並下載留底,萬一機器出狀況可還原。</li>
+      </ul>
+
+      <h3>📜 審計日誌</h3>
+      <ul>
+        <li><strong>在哪:</strong>管理員的「系統健康」頁。</li>
+        <li><strong>內容:</strong>全站變更紀錄——誰、在何時、做了什麼(登入、編輯總結、階段點燈、貼標籤等),便於稽核與追查。</li>
+        <li><strong>怎麼用:</strong>可依「使用者」或「動作類型」篩選,快速定位某項變更是哪位同仁在什麼時候做的。</li>
+        <li><strong>注意:</strong>僅管理角色可查閱;這是釐清「誰改了什麼」時的第一手依據。</li>
+      </ul>
     </section>
 
     <section class="card help-card" id="sec-faq">

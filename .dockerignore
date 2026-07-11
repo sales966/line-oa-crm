@@ -1,0 +1,23 @@
+# 建置映像時不複製這些(避免把本機資料/金鑰/相依帶進映像;node_modules 於 builder 內重裝)
+**/node_modules
+backend/data
+backend/storage
+backend/backups
+backend/scripts
+data
+storage
+.env
+*.env
+!backend/.env.example
+.git
+.claude
+.vscode
+*.log
+webui/plugin.zip
+bagsite
+mbpack-video
+mockup-studio
+scripts
+scripts-ops
+PLAN.md
+CONTRACT.md

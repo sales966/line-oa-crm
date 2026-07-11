@@ -9,8 +9,10 @@ node_modules/
 # 数据与档案(本地主数据,勿入 git)
 backend/data/
 backend/storage/
+backend/backups/
 data/
 storage/
+backups/
 
 # SQLite 附属文件
 *.db
@@ -21,6 +23,7 @@ storage/
 *.log
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # 建置产物 / 打包
 webui/plugin.zip
