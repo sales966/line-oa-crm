@@ -176,6 +176,57 @@ CREATE TABLE llm_usage (
   trigger TEXT,
   createdAt INTEGER
 );
+
+-- summaries:折入 db.ts 后续 ALTER 补的 orderId / edited* 列(供 search / dashboard no-summary 测)
+CREATE TABLE summaries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  lineChatId TEXT NOT NULL,
+  summaryText TEXT,
+  stageGuess TEXT,
+  keyFacts TEXT,
+  nextActions TEXT,
+  model TEXT,
+  coveredUntilTs INTEGER,
+  createdAt INTEGER,
+  orderId INTEGER DEFAULT 0,
+  editedText TEXT,
+  editedByUserId INTEGER,
+  editedByName TEXT,
+  editedAt INTEGER
+);
+
+CREATE TABLE sync_requests (
+  lineChatId TEXT PRIMARY KEY,
+  status TEXT CHECK (status IN ('pending','done','error')) DEFAULT 'pending',
+  requestedAt INTEGER,
+  completedAt INTEGER,
+  error TEXT
+);
+
+CREATE TABLE audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  lineChatId TEXT,
+  userId INTEGER,
+  userName TEXT,
+  action TEXT NOT NULL,
+  target TEXT,
+  detail TEXT,
+  createdAt INTEGER
+);
+
+-- 客户标签:共享标签定义 + 客户↔标签多对多(无外键,与正式库一致)
+CREATE TABLE tags (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT UNIQUE NOT NULL,
+  color TEXT,
+  createdAt INTEGER
+);
+CREATE TABLE customer_tags (
+  lineChatId TEXT NOT NULL,
+  tagId INTEGER NOT NULL,
+  createdAt INTEGER,
+  UNIQUE (lineChatId, tagId)
+);
 `;
 
 /** 建一个隔离的临时库(file-based,os.tmpdir),永不等于正式 app.db。 */
